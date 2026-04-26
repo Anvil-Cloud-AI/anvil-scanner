@@ -1,0 +1,68 @@
+version: 2
+
+project_name: anvil-scanner
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: anvil-scanner
+    main: ./cmd/anvil-scanner
+    binary: anvil-scanner
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.Version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: anvil-scanner
+    builds: [anvil-scanner]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: "Breaking Changes"
+      regexp: "^.*!:"
+      order: 0
+    - title: "New Features"
+      regexp: "^.*feat"
+      order: 1
+    - title: "Bug Fixes"
+      regexp: "^.*fix"
+      order: 2
+    - title: Other
+      order: 99
+
+release:
+  github:
+    owner: Anvil-Cloud-AI
+    name: anvil-scanner
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
