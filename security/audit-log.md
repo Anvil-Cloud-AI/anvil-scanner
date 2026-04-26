@@ -12,8 +12,6 @@ Entries come in three types:
 
 Every entry records: date, scope, toolchain, findings by severity, and fix references.
 
-Internal pre-launch audits of the commercial backend are tracked separately in the private repository and are not reproduced here. This log is pristine from public-release onward — see [../OSS_COMMERCIAL_PLAN.md](../OSS_COMMERCIAL_PLAN.md) §5a for rationale.
-
 ---
 
 ## 2026-04-21 — Clean-sheet Go rewrite decided; launch delayed; Python moved to `python/`
@@ -233,30 +231,29 @@ Internal pre-launch audits of the commercial backend are tracked separately in t
 
 **Toolchain:**
 
-- bandit (config: [`.bandit`](../.bandit))
-- ruff `--select S` (config: [`pyproject.toml`](../pyproject.toml))
-- pip-audit (pins: [`requirements.txt`](../requirements.txt))
-- detect-secrets (baseline: [`.secrets.baseline`](../.secrets.baseline))
-- pytest (config: [`pytest.ini`](../pytest.ini))
-- CodeQL, security-extended queries (workflow: [`.github/workflows/codeql.yml`](../.github/workflows/codeql.yml))
+- `go test ./...` (workflow: [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `build` job)
+- `go vet ./...` (workflow: [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `build` job)
+- staticcheck (workflow: [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `lint` job)
+- gosec SAST, SARIF output (workflow: [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `gosec` job)
+- govulncheck (workflow: [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `govulncheck` job)
+- semgrep `p/golang` + `p/owasp-top-ten` + `p/secrets`, SARIF output (workflow: [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `semgrep` job)
 
 **Results:**
 
-- Bandit: 0 findings
-- Ruff (S-category): 0 findings
-- pip-audit: 0 known vulnerable dependencies
-- detect-secrets: 0 new secrets (baseline captures documented false positives: `/etc/passwd` as a scanning-target path, `PasswordAuthentication` as an SSH directive test fixture, docker-compose development placeholder strings)
-- pytest: *(N tests passing — fill on tag)*
-- CodeQL: 0 findings
+- go test: *(N tests passing — fill on tag)*
+- go vet: 0 findings
+- staticcheck: 0 findings
+- gosec: 0 findings
+- govulncheck: 0 known vulnerable dependencies
+- semgrep: 0 findings
 
 **Notable pre-release remediation:**
 
-- Single-commit S-category cleanup landed the full repo at zero findings across bandit / ruff-S / pip-audit / detect-secrets.
-- Every subprocess call site reviewed: list-form arguments only, `shell=False`, no user-controlled interpolation. Each `# nosec` / `# noqa` marker has a preceding one-line rationale comment.
-- HTML escaping (`html.escape`) applied to every external-data field surfaced in report output.
-- Upgrade-recommendation strings rewritten to point at "latest available version" rather than hardcoded target versions (avoids stale guidance between releases).
-- OpenClaw version detection hardened against `openclaw --version` / `openclaw status` / `docker exec` path variance.
-- HTML report rendering hardened with defensive `.get()` on every finding field to prevent `KeyError` aborts on shape drift.
+- Every subprocess call site reviewed: explicit argument lists only, no shell interpolation. Each `// #nosec` marker has a rationale comment.
+- HTML escaping (`html.EscapeString`) applied to every external-data field surfaced in report output.
+- Upgrade-recommendation strings written to point at "latest available version" rather than hardcoded target versions (avoids stale guidance between releases).
+- OpenClaw version detection hardened against `openclaw --version` / path variance across install channels.
+- HTML report rendering hardened with defensive field access on every finding to prevent panics on shape drift.
 
 **Fix commits:** *(link to release tag and comparison when public)*
 

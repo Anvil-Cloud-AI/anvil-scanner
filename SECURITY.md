@@ -4,14 +4,14 @@
 
 If you discover a security vulnerability in anvil-scanner, please report it responsibly:
 
-- **Email:** security@anvil-scanner.io
+- **Email:** security@anvilcloud.ai
 - **Do NOT** open a public GitHub issue for security vulnerabilities
 
 We will acknowledge receipt within 48 hours and aim to release a fix within 7 days for critical issues.
 
 ## Security Audit History
 
-Anvil-secure has undergone multiple rounds of security review. All findings have been remediated.
+Anvil Scanner has undergone multiple rounds of security review. All findings have been remediated.
 
 ### Round 1 — 2026-03-13 (Pre-delivery)
 - **Scope:** CLI tool + API backend
@@ -29,20 +29,17 @@ Anvil-secure has undergone multiple rounds of security review. All findings have
 - **Pass 2 findings:** 1 critical (IoC XSS), 4 high, 3 medium — all fixed
 - **Key fixes:** HTML escaping for all external data in reports, backup source path traversal guard, IPv6 firewall rule support, TOCTOU-safe report writes, gateway token leak removed, keyring error logging, atomic pf.conf writes, proper exception typing in decryption
 
-### Round 4 — 2026-03-18 (Bandit SAST)
-- **Scope:** `anvil-scanner.py` — 4,247 lines scanned
-- **Findings:** 0 critical, 0 high, 0 medium, 9 low (all expected false positives)
-- **Low-severity items:** `subprocess` import (B404), `xml.sax.saxutils` import (B406), partial-path subprocess calls (B607), `subprocess.run` without `shell=True` (B603 ×2), empty-string token comparison (B105), `try/except/continue` in filesystem walk (B112), HTML hex color codes misidentified as passwords (B105 ×2)
-- **Result:** Clean — no action required
-
 ## Automated Security Scanning
 
-The following tools run on every push and pull request:
+The following tools run on every push and pull request (see `.github/workflows/go-ci.yml`):
 
-- **[Bandit](https://bandit.readthedocs.io/)** — Python-specific SAST (static application security testing)
-- **[CodeQL](https://codeql.github.com/)** — GitHub's semantic code analysis with security-extended queries
-- **[Dependabot](https://docs.github.com/en/code-security/dependabot)** — Automated dependency vulnerability monitoring
-- **Dependency Review** — Blocks PRs that introduce high-severity vulnerable dependencies
+- **[gosec](https://github.com/securego/gosec)** — Go-specific SAST; outputs SARIF uploaded to GitHub Security
+- **[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck)** — scans against the Go vulnerability database
+- **[staticcheck](https://staticcheck.io/)** (`honnef.co/go/tools`) — extended static analysis beyond `go vet`
+- **[semgrep](https://semgrep.dev/)** — SAST with `p/golang`, `p/owasp-top-ten`, and `p/secrets` rulesets; outputs SARIF
+- **`go test ./...`** — full test suite runs on every push (Ubuntu + macOS)
+- **`go vet ./...`** — standard Go static analysis
+- **[Dependabot](https://docs.github.com/en/code-security/dependabot)** — automated Go module and GitHub Actions dependency monitoring
 
 Current status: **0 high-severity, 0 medium-severity** findings across all automated scans.
 
@@ -52,7 +49,7 @@ Current status: **0 high-severity, 0 medium-severity** findings across all autom
 - **SSRF validation** — Ollama URL validated against localhost-only allowlist
 - **Atomic file operations** — System config files (sshd_config, pf.conf, manifests) written via temp + rename
 - **Secret management** — API keys stored via OS keyring (GNOME Keyring, macOS Keychain), encrypted file, or environment variable; no plaintext secrets on disk
-- **HTML escaping** — All external data in reports passes through `html.escape()`
+- **HTML escaping** — All external data in reports passes through `html.EscapeString`
 - **Path validation** — Backup restore validates both source (inside session dir) and destination (managed path prefixes)
-- **TLS everywhere** — All external API calls use `ssl.create_default_context()`
+- **TLS everywhere** — All external API calls use Go's `crypto/tls` with default certificate verification
 - **No hardcoded credentials** — All secrets loaded from env vars, keyring, or encrypted store

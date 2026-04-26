@@ -1,6 +1,6 @@
 # Filesystem Security Guide
 
-Even if attackers can't break into your system from the outside, a misconfigured filesystem can let them escalate privileges once they have a foothold. This guide covers the filesystem checks Anvil-Secure performs — securing temp directories, finding dangerous permissions, and setting safe defaults.
+Even if attackers can't break into your system from the outside, a misconfigured filesystem can let them escalate privileges once they have a foothold. This guide covers the filesystem checks Anvil Scanner performs — securing temp directories, finding dangerous permissions, and setting safe defaults.
 
 ---
 

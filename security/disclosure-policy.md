@@ -49,9 +49,9 @@ We use CVSS 3.1 for severity scoring and publish the vector in every advisory. T
 
 **In scope** — the code shipped in this repository:
 
-- `anvil_scanner/` — scanner, hardening, reporting, CLI.
-- `vulndb/` — in-tree CVE and advisory data, updater script, signing verification.
-- Release artifacts (signed tarballs / wheels published from this repo).
+- `internal/` — scanner, hardening, reporting, AI, secrets, and all core packages.
+- `cmd/anvil-scanner/` — CLI entry point.
+- Release artifacts (signed tarballs published from this repo).
 - Documentation and examples that could mislead users into an insecure configuration.
 
 **Out of scope:**

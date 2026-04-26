@@ -57,7 +57,7 @@ than attempting to decrypt, since implementing Fernet would require a third-part
 ```
 Legacy secrets container (Fernet) detected.
 Migrate using the Python tool:
-  python3 anvil-scanner.py --init-secrets   # re-encrypts under new format
+  anvil-scanner --init-secrets   # re-encrypts under new format
 ```
 
 ### Key backends

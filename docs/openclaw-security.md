@@ -208,7 +208,7 @@ Set up alerts in your API provider dashboard for:
 - [ ] ufw blocks direct access to ports 18789/18791/9090/19001
 - [ ] All API keys are in the encrypted secrets store, not plaintext files
 - [ ] OpenClaw runs as a non-root user with minimal system permissions
-- [ ] Logs are being monitored (e.g., via the Anvil-Secure report)
+- [ ] Logs are being monitored (e.g., via the Anvil Scanner report)
 
 ---
 

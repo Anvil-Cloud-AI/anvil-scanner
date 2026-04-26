@@ -2,8 +2,7 @@
 
 This document specifies how anvil-scanner integrates with OpenClaw as an auditing plugin.  It covers the subprocess protocol, the JSON finding schema, install-channel detection, severity mapping, error handling, and how findings surface in reports.
 
-**Implementation**: `internal/openclaw/openclaw.go`  
-**Reference**: `python/anvil_scanner/openclaw_audit.py`
+**Implementation**: `internal/openclaw/openclaw.go`
 
 ---
 

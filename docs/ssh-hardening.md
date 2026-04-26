@@ -1,6 +1,6 @@
 # SSH Hardening Guide
 
-SSH (Secure Shell) is the primary way administrators log into Linux servers remotely. A misconfigured SSH server is one of the most common ways attackers break into systems — either by brute-forcing passwords or exploiting weak encryption. This guide walks you through every SSH check Anvil-Secure performs and exactly how to fix each one.
+SSH (Secure Shell) is the primary way administrators log into Linux servers remotely. A misconfigured SSH server is one of the most common ways attackers break into systems — either by brute-forcing passwords or exploiting weak encryption. This guide walks you through every SSH check Anvil Scanner performs and exactly how to fix each one.
 
 ---
 

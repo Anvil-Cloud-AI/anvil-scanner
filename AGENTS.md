@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **anvil-secure** (3996 symbols, 7027 relationships, 225 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **anvil-scanner** (3996 symbols, 7027 relationships, 225 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -24,10 +24,10 @@ This project is indexed by GitNexus as **anvil-secure** (3996 symbols, 7027 rela
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/anvil-secure/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/anvil-secure/clusters` | All functional areas |
-| `gitnexus://repo/anvil-secure/processes` | All execution flows |
-| `gitnexus://repo/anvil-secure/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/anvil-scanner/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/anvil-scanner/clusters` | All functional areas |
+| `gitnexus://repo/anvil-scanner/processes` | All execution flows |
+| `gitnexus://repo/anvil-scanner/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 

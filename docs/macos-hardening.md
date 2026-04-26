@@ -1,6 +1,6 @@
 # macOS Hardening Guide
 
-macOS comes with solid security foundations, but several important protections are either disabled by default or need verification. This guide covers the macOS checks Anvil-Secure performs and how to fix each one via the Terminal or System Settings.
+macOS comes with solid security foundations, but several important protections are either disabled by default or need verification. This guide covers the macOS checks Anvil Scanner performs and how to fix each one via the Terminal or System Settings.
 
 ---
 

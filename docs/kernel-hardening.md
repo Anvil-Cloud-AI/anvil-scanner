@@ -1,6 +1,6 @@
 # Kernel Hardening Guide
 
-The Linux kernel has dozens of security settings that are turned off by default for compatibility reasons. Enabling them significantly raises the bar for attackers who have already gotten code running on your system. This guide covers the kernel sysctl settings that Anvil-Secure checks.
+The Linux kernel has dozens of security settings that are turned off by default for compatibility reasons. Enabling them significantly raises the bar for attackers who have already gotten code running on your system. This guide covers the kernel sysctl settings that Anvil Scanner checks.
 
 ---
 
@@ -188,7 +188,7 @@ Create `/etc/sysctl.d/99-hardening.conf` with the following content:
 
 ```ini
 # /etc/sysctl.d/99-hardening.conf
-# Kernel hardening settings — applied by Anvil-Secure recommendations
+# Kernel hardening settings — applied by Anvil Scanner recommendations
 
 # ASLR - full randomization
 kernel.randomize_va_space = 2

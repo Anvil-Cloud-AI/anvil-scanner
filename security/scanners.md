@@ -6,101 +6,97 @@ If you just want the one-shot command to reproduce CI on your laptop, skip to [R
 
 ## What runs on every push
 
-| Scanner          | Purpose                                | Config                                                        | Blocks merge on                    |
-| ---------------- | -------------------------------------- | ------------------------------------------------------------- | ---------------------------------- |
-| bandit           | Python SAST (AST pattern rules)        | [`.bandit`](../.bandit)                                       | Any medium+ severity finding       |
-| ruff `--select S` | Security lint (flake8-bandit ruleset)  | [`pyproject.toml`](../pyproject.toml) `[tool.ruff.lint]`      | Any un-suppressed S-rule finding   |
-| pip-audit        | Dependency CVE check                   | [`requirements.txt`](../requirements.txt) (pinned)            | Any HIGH or CRITICAL CVE           |
-| detect-secrets   | Secret scanner (delta vs. baseline)    | [`.secrets.baseline`](../.secrets.baseline)                   | Any secret not already in baseline |
-| pytest           | Unit + integration tests               | [`pytest.ini`](../pytest.ini)                                 | Any test failure                   |
-| CodeQL           | Semantic dataflow (GitHub-hosted)      | [`.github/workflows/codeql.yml`](../.github/workflows/codeql.yml), `security-extended` | Any finding in `security-extended` query pack |
-| Dependabot       | Upstream advisory monitor              | [`.github/dependabot.yml`](../.github/dependabot.yml)         | N/A — opens PRs, doesn't gate      |
+| Scanner        | Purpose                                     | Config / Workflow                                                       | Blocks merge on                          |
+| -------------- | ------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------- |
+| `go test`      | Full test suite (Ubuntu + macOS matrix)     | [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `build` job | Any test failure                     |
+| `go vet`       | Standard Go static analysis                 | [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `build` job | Any vet finding                      |
+| staticcheck    | Extended static checks beyond `go vet`      | [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `lint` job  | Any finding                          |
+| gosec          | Go SAST — insecure patterns, subprocess use, TLS | [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `gosec` job | Any finding (SARIF uploaded)        |
+| govulncheck    | Go vulnerability database scan              | [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `govulncheck` job | Any known vulnerable module    |
+| semgrep        | SAST with `p/golang`, `p/owasp-top-ten`, `p/secrets` | [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml) `semgrep` job | Any finding (SARIF uploaded, `continue-on-error`) |
+| Dependabot     | Go module + GitHub Actions advisory monitor | [`.github/dependabot.yml`](../.github/dependabot.yml)                  | N/A — opens PRs, doesn't gate           |
 
-The bandit and pip-audit jobs are wired in [`.github/workflows/security.yml`](../.github/workflows/security.yml). CodeQL lives in its own workflow so it can run on its own schedule.
+The `build`, `lint`, `gosec`, `govulncheck`, and `semgrep` jobs are all defined in [`.github/workflows/go-ci.yml`](../.github/workflows/go-ci.yml). SARIF results from gosec and semgrep are uploaded to the GitHub Security tab via `github/codeql-action/upload-sarif`.
 
 ## Reproduce CI locally
 
 One-shot block — run from repo root:
 
 ```bash
-# 1. Install scanners
-pip install bandit ruff pip-audit detect-secrets pytest
+# 1. Install scanners (first time only)
+go install honnef.co/go/tools/cmd/staticcheck@latest
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+go install golang.org/x/vuln/cmd/govulncheck@latest
+# semgrep requires Python: pip install semgrep
 
 # 2. Run the same checks CI runs
-bandit -c .bandit -r anvil_scanner vulndb -ll
-ruff check --select S anvil_scanner vulndb
-pip-audit -r requirements.txt
-detect-secrets scan --baseline .secrets.baseline
-pytest
+go test ./...
+go vet ./...
+staticcheck ./...
+gosec -fmt sarif -out gosec.sarif ./...
+govulncheck ./...
+semgrep ci --sarif --output semgrep.sarif \
+  --config p/golang --config p/owasp-top-ten --config p/secrets
 ```
 
-If all five exit 0, you'd pass the push-time gates. CodeQL runs GitHub-side only; a local approximation is `codeql database create` + `codeql database analyze --format=sarif-latest`, but there's no requirement to reproduce it locally.
+If all commands exit 0, you'd pass the push-time gates. SARIF uploads are GitHub-side only.
 
 ## Per-scanner detail
 
-### bandit
+### go test
 
-Python-specific SAST that scans the AST for known-insecure patterns (subprocess with `shell=True`, hardcoded passwords, weak hashes, insecure SSL contexts, etc.).
+Runs the full test suite on every push across Ubuntu and macOS. Security-relevant test coverage includes subprocess arg-list enforcement, HTML escaping, path traversal guards, TOCTOU-safe writes, SSRF validators, and secrets container round-trips.
 
-- **Config:** [`.bandit`](../.bandit)
-- **Run:** `bandit -c .bandit -r anvil_scanner vulndb -ll`
-- **Severity filter:** `-ll` means report LOW and above; CI fails on MEDIUM+ via `-ll` plus manual review of LOW.
-- **File-wide skips** (in `.bandit`): B108, B104, B310 — each with a rationale comment explaining why the pattern is a scanning target, not a vulnerability. Re-read the `.bandit` header before adding to this list.
-- **Inline suppression:** `# nosec B<ID>  # <one-line rationale>` on the offending line. Rationale comment is mandatory — no bare `# nosec`.
+- **Run:** `go test ./...`
+- **Race detection:** Run locally with `go test -race ./...` for extra coverage.
 
-### ruff (S-category)
+### go vet
 
-Ruff ships the flake8-bandit rules as the `S` prefix. Faster than bandit and catches a mostly-overlapping but non-identical set.
+Standard Go static analyzer built into the toolchain. Catches suspicious constructs: misuse of `sync/atomic`, incorrect format strings, unreachable code, etc.
 
-- **Config:** `[tool.ruff.lint]` in `pyproject.toml`, `select = ["S"]` (plus other lint rules).
-- **Run:** `ruff check --select S anvil_scanner vulndb`
-- **Inline suppression:** `# noqa: S<ID>  # <rationale>` on the offending line.
-- **File-level suppression:** `# ruff: noqa: S<ID>` as the first line of the file, with a header comment explaining why the whole file is exempt (e.g., `cli.py`, `threat_intel.py`, `ai_analysis.py`, `vulndb/update.py` for S310 — all urllib calls validated against allowlists or hard-coded well-known endpoints).
-- **Double-suppression:** When bandit *and* ruff both flag a line, both markers go on the same line: `# nosec B310  # noqa: S310  # <rationale>`.
+- **Run:** `go vet ./...`
 
-### pip-audit
+### staticcheck
 
-Cross-references `requirements.txt` pins against the OSV and PyPI advisory databases.
+Extended static analysis from `honnef.co/go/tools`. Goes beyond `go vet` with checks for deprecated API usage, unnecessary type conversions, unreachable code paths, and style issues that indicate bugs.
 
-- **Run:** `pip-audit -r requirements.txt`
-- **Fail condition:** CI fails on HIGH or CRITICAL CVEs. MEDIUM and below open a follow-up issue but don't block the push.
-- **Remediation:** Bump the pin in `requirements.txt` to a non-vulnerable version, re-run pip-audit, re-run the full test suite (dep bumps have caused test failures before). If a fix isn't available upstream, add a justified ignore via `pip-audit --ignore-vuln <ID>` and document the decision in `audit-log.md`.
+- **Install:** `go install honnef.co/go/tools/cmd/staticcheck@latest`
+- **Run:** `staticcheck ./...`
+- **Inline suppression:** `//nolint:staticcheck // <one-line rationale>` on the offending line. Rationale is mandatory.
 
-### detect-secrets
+### gosec
 
-Scans for high-entropy strings and known credential patterns (AWS keys, private keys, JWT tokens, etc.). Uses a committed baseline so only *new* secrets fail CI.
+Go-specific SAST that scans the AST for known-insecure patterns: subprocess calls with `shell=true`, hardcoded credentials, weak hash functions, insecure TLS configs, G104 (unhandled errors), path traversal, etc.
 
-- **Baseline:** [`.secrets.baseline`](../.secrets.baseline)
-- **Run (delta scan, what CI does):** `detect-secrets scan --baseline .secrets.baseline`
-- **Audit baseline entries:** `detect-secrets audit .secrets.baseline` — interactive tool for marking entries as true or false positives.
-- **Update the baseline after a legitimate new false positive:** `detect-secrets scan --baseline .secrets.baseline --update` then `detect-secrets audit .secrets.baseline` to mark the new entry, then commit the updated baseline.
+- **Workflow job:** `gosec` in `.github/workflows/go-ci.yml`
+- **Run:** `gosec -fmt sarif -out gosec.sarif ./...`
+- **Output:** SARIF file uploaded to GitHub Security tab.
+- **Inline suppression:** `// #nosec G<ID> -- <rationale>` on the offending line. Rationale is mandatory — no bare `#nosec`.
 
-Known documented false positives in the current baseline:
+### govulncheck
 
-- `/etc/passwd` — scanning-target path, not a password file reference.
-- `PasswordAuthentication` — SSH directive name used in test fixtures and hardening checks.
-- Docker-compose placeholder strings (`changeme`, `example`) in development-only templates.
+Scans the module graph and call graph against the Go vulnerability database (`vuln.go.dev`). Only reports vulnerabilities in packages that are actually called, not just imported transitively.
 
-If a real secret lands in a commit, rotate the credential first, then patch the repo (either `git filter-repo` for pre-release history or a documented rotation note in `audit-log.md` for post-release).
+- **Workflow job:** `govulncheck` in `.github/workflows/go-ci.yml`
+- **Run:** `govulncheck ./...`
+- **Fail condition:** Any known vulnerability in a transitively-reachable call path.
+- **Remediation:** Bump the module version in `go.mod` / `go.sum` to a non-vulnerable version, re-run govulncheck, re-run the full test suite.
 
-### pytest
+### semgrep
 
-Not a security scanner per se, but the security posture depends on the test suite catching regressions in the hardened code paths (subprocess arg-list enforcement, HTML escaping, path traversal guards, TOCTOU-safe writes, SSRF validators).
+SAST with three rulesets:
+- `p/golang` — Go-idiomatic patterns (nil checks, defer misuse, goroutine leaks)
+- `p/owasp-top-ten` — OWASP Top 10 categories
+- `p/secrets` — hard-coded API keys, tokens, credentials
 
-- **Run:** `pytest`
-- **Coverage targets of note:** `anvil_scanner/reporting.py` (HTML escaping), `anvil_scanner/scanner.py` (subprocess calls, path validation), `anvil_scanner/threat_intel.py` (URL allowlist, CVE matching), `anvil_scanner/keyring_helpers.py` (secret storage).
-
-### CodeQL
-
-GitHub-hosted semantic analysis. Runs the `security-extended` query pack, which includes everything in `security` plus dataflow queries for injection and tainted-data propagation.
-
-- **Workflow:** [`.github/workflows/codeql.yml`](../.github/workflows/codeql.yml)
-- **Triggers:** push to `main`, pull requests, weekly schedule.
-- **Output:** Alerts appear under the repo's Security tab. Alerts are triaged the same way as any other finding — either fixed, dismissed with `won't fix` and written justification, or marked `false positive` with a comment.
+- **Workflow job:** `semgrep` in `.github/workflows/go-ci.yml` (runs in `semgrep/semgrep` container)
+- **Run:** `semgrep ci --sarif --output semgrep.sarif`
+- **`continue-on-error`:** `true` — semgrep findings are surfaced via SARIF but don't hard-block the workflow at this time. Triage findings under the Security tab.
+- **Output:** SARIF file uploaded to GitHub Security tab.
 
 ### Dependabot
 
-Opens PRs against `requirements.txt` (and `actions/` versions in workflow files) when upstream advisories land. Does not block anything by itself; pip-audit is the gate.
+Opens PRs against `go.mod` (Go modules) and workflow `actions/` pins when upstream advisories land. Does not block anything by itself; govulncheck is the gate for vulnerability regressions.
 
 - **Config:** [`.github/dependabot.yml`](../.github/dependabot.yml)
 
@@ -110,9 +106,8 @@ Opens PRs against `requirements.txt` (and `actions/` versions in workflow files)
 
 1. Reproduce locally so you understand what triggered it.
 2. Write out the rationale in plain prose before choosing a suppression syntax. If the rationale is hard to write, the finding is probably real.
-3. Prefer narrow suppressions: a single-line `# nosec B<ID>  # rationale` beats a file-wide skip; a file-wide skip beats a global `.bandit` skip.
-4. Every global skip added to `.bandit` or file-level `# ruff: noqa` header requires a comment explaining why the entire scope is exempt.
-5. Put the comment *above* or *on* the suppressed line — never below, never elsewhere in the file.
+3. Prefer narrow suppressions: a single-line `// #nosec G<ID> -- rationale` beats a file-wide or package-wide skip.
+4. Put the comment *on* the suppressed line — never below, never elsewhere in the file.
 
 **When a scanner is wrong:**
 

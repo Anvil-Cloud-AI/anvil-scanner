@@ -1,13 +1,8 @@
 //go:build darwin || linux
 
 // Command anvil-scanner is the CLI entry point for the Anvil Scanner
-// security hardening tool.
-//
-// This is the Go clean-sheet rewrite tracked by ADR-0001. The Python
-// reference implementation lives under ../python/ and serves as the
-// behavioral specification until the Go build passes
-// docs/porting-checklist.md. See docs/adr/0001-go-migration.md for
-// the decision record.
+// security hardening tool. See docs/adr/0001-go-migration.md for the
+// architecture decision record.
 package main
 
 import (
@@ -131,7 +126,7 @@ func run(args []string) error {
 		fmt.Fprintln(os.Stderr)
 	}
 
-	fmt.Fprintf(progress, "Anvil-Secure %s — hardening scan\n", Version)
+	fmt.Fprintf(progress, "Anvil Scanner %s — hardening scan\n", Version)
 	fmt.Fprintf(progress, "Platform: %s\n\n", scan.Platform())
 
 	// Load stored API keys into os.Environ before AI provider detection.

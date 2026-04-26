@@ -169,6 +169,15 @@ sudo anvil-scanner --telemetry
 
 # Print version
 anvil-scanner --version
+
+# Force uninstall even when no backups found
+sudo anvil-scanner --uninstall --force
+
+# Copy secrets from container into individual OS keyring entries
+sudo anvil-scanner --store-keyring
+
+# Specify key backend for --init-secrets / --encrypt
+sudo anvil-scanner --init-secrets --backend keyring
 ```
 
 ---
@@ -199,6 +208,8 @@ Enable with `--threat-intel`. Results appear in the HTML report's **Threat Intel
 | `AI_MODEL` | Model override | per-provider default | Override the default model |
 | `ANVIL_TELEMETRY` | Telemetry | `0` | Set to `1` to enable (same as `--telemetry`) |
 | `ANVIL_SECRETS_PASSPHRASE` | Secrets (passphrase backend) | — | Passphrase for unattended decryption in CI |
+| `OLLAMA_URL` | Ollama endpoint | `http://localhost:11434` | Override the local Ollama server URL |
+| `XAI_API_URL` | Grok endpoint | `https://api.x.ai/v1` | Override the xAI API base URL |
 
 ---
 

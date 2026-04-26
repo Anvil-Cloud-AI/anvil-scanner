@@ -100,11 +100,9 @@ ignoreregex =
 - Block IPs that trigger 401 (Unauthorized), 403 (Forbidden), or 429 (Rate Limited) errors, or that show patterns like "invalid" or "unauthorized"
 - If an IP does this 10 times within 5 minutes, ban for 1 hour
 
-### Deploy automatically with Anvil-Secure:
+### Deploy automatically
 
-```bash
-python3 anvil-scanner.py --fail2ban
-```
+The jail configuration files above can be copied into place manually following the steps in this guide. Anvil Scanner does not expose a `--fail2ban` flag; use the manual setup steps in Steps 2–3 above to deploy the jails.
 
 ---
 

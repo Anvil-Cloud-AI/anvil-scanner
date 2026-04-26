@@ -1,6 +1,6 @@
 # User & Authentication Hardening Guide
 
-Weak authentication is the #1 way attackers get into systems. This guide covers the user and password checks that Anvil-Secure performs — from finding dangerous account configurations to enforcing strong password policies.
+Weak authentication is the #1 way attackers get into systems. This guide covers the user and password checks that Anvil Scanner performs — from finding dangerous account configurations to enforcing strong password policies.
 
 ---
 

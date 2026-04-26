@@ -1,4 +1,4 @@
-# Anvil-Secure Hardening Guides
+# Anvil Scanner Hardening Guides
 
 Plain-English security guides for every check category. Each guide explains *why* a setting matters and gives step-by-step instructions to fix it — no security expertise required.
 
@@ -36,9 +36,9 @@ see the [OpenClaw security docs](https://docs.openclaw.ai/security).
 
 ---
 
-## About Anvil-Secure
+## About Anvil Scanner
 
-Anvil-Secure is an open-source security scanner for Linux and macOS systems. It checks hundreds of configuration settings against CIS Benchmarks and other industry standards, then generates a prioritized report with specific recommendations.
+Anvil Scanner is an open-source security scanner for Linux and macOS systems. It checks hundreds of configuration settings against CIS Benchmarks and other industry standards, then generates a prioritized report with specific recommendations.
 
 - [GitHub Repository](https://github.com/Anvil-Cloud-AI/anvil-scanner)
 - [README](../README.md)

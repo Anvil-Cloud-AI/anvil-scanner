@@ -281,7 +281,7 @@ func RevertSession(sessionDir string) (restored, failed int, err error) {
 // r and w are used for all I/O so the function is fully testable.
 // Mirrors do_revert() from the Python reference.
 func DoRevert(r io.Reader, w io.Writer) error {
-	fmt.Fprintf(w, "\n╔══════════════════════════════════════════╗\n║         Anvil-Secure — Revert            ║\n╚══════════════════════════════════════════╝\n\n")
+	fmt.Fprintf(w, "\n╔══════════════════════════════════════════╗\n║         Anvil Scanner — Revert           ║\n╚══════════════════════════════════════════╝\n\n")
 
 	sessions := ListSessions()
 	if len(sessions) == 0 {
@@ -376,7 +376,7 @@ func DoRevert(r io.Reader, w io.Writer) error {
 // r and w are used for all I/O. force skips the "no backups" early-exit.
 // Mirrors do_uninstall() from the Python reference.
 func DoUninstall(r io.Reader, w io.Writer, force bool) error {
-	fmt.Fprintf(w, "\n╔══════════════════════════════════════════════════════╗\n║         Anvil-Secure — Full Uninstall / Restore     ║\n╚══════════════════════════════════════════════════════╝\n\n")
+	fmt.Fprintf(w, "\n╔══════════════════════════════════════════════════════╗\n║       Anvil Scanner — Full Uninstall / Restore      ║\n╚══════════════════════════════════════════════════════╝\n\n")
 
 	sessions := ListSessions()
 	if len(sessions) == 0 && !force {
@@ -470,10 +470,10 @@ func DoUninstall(r io.Reader, w io.Writer, force bool) error {
 	}
 	fmt.Fprintln(w)
 	if totalFailed > 0 {
-		fmt.Fprintf(w, "WARNING: Anvil-Secure uninstall completed with errors — %d file(s) could not be restored.\n", totalFailed)
+		fmt.Fprintf(w, "WARNING: Anvil Scanner uninstall completed with errors — %d file(s) could not be restored.\n", totalFailed)
 		fmt.Fprintf(w, "Your system may not be fully restored to its pre-hardening state.\n\n")
 	} else {
-		fmt.Fprintf(w, "Anvil-Secure has been fully uninstalled.\n")
+		fmt.Fprintf(w, "Anvil Scanner has been fully uninstalled.\n")
 		fmt.Fprintf(w, "Your system has been restored to its pre-hardening state.\n\n")
 	}
 
