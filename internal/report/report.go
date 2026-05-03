@@ -1,14 +1,13 @@
 // Package report generates HTML and JSON scan reports from hardening check results.
-// It is the Go port of python/anvil_scanner/reporting.py.
 //
-// Priority Findings filter is preserved exactly:
+// Priority Findings filter:
 //
 //	status ∈ {FAIL, WARN} AND severity ∈ {critical, high}
 //
 // Medium severity never promotes regardless of status.
 //
-// See python/tests/test_refactor_guardrails.py::TestReportRedesignSubnavAndScrollSpy
-// for the HTML structural contract.
+// The HTML report includes a sticky subnav, per-section anchors, and an
+// IntersectionObserver-based scroll-spy that highlights the active section.
 package report
 
 import (

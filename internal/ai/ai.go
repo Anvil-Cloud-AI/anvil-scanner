@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -92,12 +93,35 @@ func DetectProvider() (Provider, string) {
 	return ProviderNone, "no provider available"
 }
 
+// validateOllamaURL rejects any Ollama URL that is not strictly localhost http.
+// This prevents SSRF-style attacks via a malicious OLLAMA_URL environment variable.
+func validateOllamaURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid OLLAMA_URL: %w", err)
+	}
+	if u.Scheme != "http" {
+		return fmt.Errorf("OLLAMA_URL scheme must be http, got %q", u.Scheme)
+	}
+	hostname := u.Hostname()
+	switch hostname {
+	case "localhost", "127.0.0.1", "::1":
+		// allowed
+	default:
+		return fmt.Errorf("OLLAMA_URL hostname must be localhost, 127.0.0.1, or ::1, got %q", hostname)
+	}
+	return nil
+}
+
 // OllamaReachable returns true if an Ollama server responds at OLLAMA_URL within
 // 500ms. Uses /api/tags — the lightest documented Ollama endpoint.
 func OllamaReachable() bool {
 	ollamaBase := defaultOllamaURL
 	if u := os.Getenv("OLLAMA_URL"); u != "" {
 		ollamaBase = u
+	}
+	if err := validateOllamaURL(ollamaBase); err != nil {
+		return false
 	}
 	base := strings.TrimRight(ollamaBase, "/")
 	ctx, cancel := context.WithTimeout(context.Background(), ollamaProbeTimeout)
@@ -114,13 +138,12 @@ func OllamaReachable() bool {
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
-// Analyze runs an AI risk analysis for the given prompt using the detected (or
-// explicitly set) provider. Returns a skip result when skip is true.
-func Analyze(prompt string, skip bool) Analysis {
+// Analyze runs an AI risk analysis for the given prompt using the supplied
+// provider (already detected by the caller). Returns a skip result when skip is true.
+func Analyze(ctx context.Context, prompt string, skip bool, provider Provider) Analysis {
 	if skip {
 		return Analysis{Skipped: true}
 	}
-	provider, _ := DetectProvider()
 	if provider == ProviderNone {
 		return Analysis{
 			Provider:    ProviderNone,
@@ -192,6 +215,9 @@ func callOllama(prompt string) (string, error) {
 	if u := os.Getenv("OLLAMA_URL"); u != "" {
 		ollamaBase = u
 	}
+	if err := validateOllamaURL(ollamaBase); err != nil {
+		return "", fmt.Errorf("ollama URL validation failed: %w", err)
+	}
 	base := strings.TrimRight(ollamaBase, "/")
 	model := os.Getenv("AI_MODEL")
 	if model == "" {
@@ -227,7 +253,7 @@ func callOllama(prompt string) (string, error) {
 	var result struct {
 		Response string `json:"response"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
 		return "", fmt.Errorf("ollama response parse error: %w", err)
 	}
 	return result.Response, nil
@@ -268,7 +294,10 @@ func callClaude(prompt string) (string, error) {
 		return "", fmt.Errorf("claude request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("read response: %v", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("claude API error %d: %s", resp.StatusCode, string(respBody))
 	}
@@ -319,7 +348,10 @@ func callOpenAI(prompt, model, key, baseURL string) (string, error) {
 		return "", fmt.Errorf("API request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("read response: %v", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
 	}

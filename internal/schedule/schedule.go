@@ -2,7 +2,6 @@
 
 // Package schedule installs and removes the anvil-scanner hourly scheduled job.
 // On macOS it uses a launchd LaunchAgent plist; on Linux it edits the user crontab.
-// This is the Go port of python/anvil_scanner/reporting.py::setup_cron_*.
 package schedule
 
 import (

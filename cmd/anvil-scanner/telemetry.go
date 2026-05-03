@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -155,6 +156,7 @@ func submitTelemetry(rd report.Data) {
 	if err != nil {
 		return
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 }
 

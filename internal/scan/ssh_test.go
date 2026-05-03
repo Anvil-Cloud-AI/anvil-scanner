@@ -44,6 +44,7 @@ func runSSHChecksWithCfg(cfg map[string]string) *CheckBuilder {
 // filesystem or requiring root.
 func runDirectiveChecks(b *CheckBuilder, cfg map[string]string) {
 	checkSSHInt(b, cfg, "SSH-006", "MaxAuthTries ≤ 4", "MaxAuthTries",
+		false,
 		func(v int) bool { return v <= 4 },
 		func(v int) string { return formatf("MaxAuthTries = %d", v) },
 		func(v int) string { return formatf("MaxAuthTries = %d (should be ≤ 4)", v) },
@@ -51,6 +52,7 @@ func runDirectiveChecks(b *CheckBuilder, cfg map[string]string) {
 		SeverityMedium,
 	)
 	checkSSHInt(b, cfg, "SSH-008", "LoginGraceTime ≤ 60s", "LoginGraceTime",
+		true,
 		func(v int) bool { return v <= 60 },
 		func(v int) string { return formatf("LoginGraceTime = %ds", v) },
 		func(v int) string { return formatf("LoginGraceTime = %ds (should be ≤ 60)", v) },
@@ -259,6 +261,7 @@ func TestCheckSSHInt_Pass(t *testing.T) {
 	b := NewBuilder(WithClock(fixedClock()))
 	cfg := map[string]string{"maxauthtries": "3"}
 	checkSSHInt(b, cfg, "SSH-006", "MaxAuthTries ≤ 4", "MaxAuthTries",
+		false,
 		func(v int) bool { return v <= 4 },
 		func(v int) string { return "ok" },
 		func(v int) string { return "bad" },
@@ -275,6 +278,7 @@ func TestCheckSSHInt_Fail(t *testing.T) {
 	b := NewBuilder(WithClock(fixedClock()))
 	cfg := map[string]string{"maxauthtries": "6"}
 	checkSSHInt(b, cfg, "SSH-006", "MaxAuthTries ≤ 4", "MaxAuthTries",
+		false,
 		func(v int) bool { return v <= 4 },
 		func(v int) string { return "ok" },
 		func(v int) string { return "bad" },
@@ -291,6 +295,7 @@ func TestCheckSSHInt_Warn_NotSet(t *testing.T) {
 	b := NewBuilder(WithClock(fixedClock()))
 	cfg := map[string]string{}
 	checkSSHInt(b, cfg, "SSH-006", "MaxAuthTries ≤ 4", "MaxAuthTries",
+		false,
 		func(v int) bool { return v <= 4 },
 		func(v int) string { return "ok" },
 		func(v int) string { return "bad" },
@@ -307,6 +312,7 @@ func TestCheckSSHInt_LoginGraceTime_StripsSuffix(t *testing.T) {
 	b := NewBuilder(WithClock(fixedClock()))
 	cfg := map[string]string{"logingracetime": "30s"}
 	checkSSHInt(b, cfg, "SSH-008", "LoginGraceTime ≤ 60s", "LoginGraceTime",
+		true,
 		func(v int) bool { return v <= 60 },
 		func(v int) string { return "ok" },
 		func(v int) string { return "bad" },

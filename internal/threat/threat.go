@@ -101,8 +101,7 @@ func getPublicIP() string {
 	}
 	req.Header.Set("User-Agent", "anvil-scanner/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return ""
 	}

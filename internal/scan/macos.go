@@ -55,8 +55,8 @@ func macos001SIP(b *CheckBuilder) {
 // Priority Findings. This is the canonical FileVault calibration rule
 // (downgraded 2026-04-19).
 //
-// See python/tests/test_refactor_guardrails.py::TestFileVaultIsSuggestionNotCritical
-// for the behavioral contract this preserves.
+// Behavioral contract: FileVault absence is a suggestion (medium severity),
+// never promoted to a critical priority finding.
 func macos002FileVault(b *CheckBuilder) {
 	res := exec.Run("fdesetup", "status")
 	out := strings.TrimSpace(res.Stdout)

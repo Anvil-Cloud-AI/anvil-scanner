@@ -3,13 +3,13 @@
 package threat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -74,7 +74,7 @@ func fetchKEVFeed() (*kevFeed, float64, string) {
 
 	// Fetch from network.
 	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, kevFeedURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, kevFeedURL, nil)
 	if err != nil {
 		return nil, 0, fmt.Sprintf("KEV request build failed: %v", err)
 	}
@@ -108,7 +108,12 @@ func fetchKEVFeed() (*kevFeed, float64, string) {
 	// Atomic write to cache.
 	tmpFile := cacheFile + ".tmp"
 	if err := os.WriteFile(tmpFile, raw, 0o600); err == nil {
-		_ = os.Rename(tmpFile, cacheFile)
+		if err := os.Rename(tmpFile, cacheFile); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: anvil-scanner: KEV cache write failed: %v\n", err)
+			_ = os.Remove(tmpFile)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "WARNING: anvil-scanner: KEV cache tmp write failed: %v\n", err)
 	}
 
 	return &feed, 0, ""
@@ -147,10 +152,7 @@ func CheckCISAKEV() CISAKEVResult {
 			}
 			// For the XZ backdoor, check for the specific affected versions.
 			if cve.CVE == "CVE-2024-3094" {
-				norm := strings.SplitN(version, ":", 2)
-				norm2 := norm[len(norm)-1]
-				norm2 = strings.SplitN(norm2, "-", 2)[0]
-				norm2 = strings.SplitN(norm2, "+", 2)[0]
+				norm2 := normalizeVersion(version)
 				if norm2 != "5.6.0" && norm2 != "5.6.1" {
 					continue
 				}

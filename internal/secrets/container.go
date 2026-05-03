@@ -21,12 +21,12 @@ const (
 	containerCurrentVersion = 1
 	headerSizeMax           = 4096
 	saltSizeMax             = 1024
-	scryptN                 = 1 << 15 // 32768
+	scryptN                 = 1 << 17 // 131072 — OWASP minimum for key-wrapping
 	scryptR                 = 8
 	scryptP                 = 1
 	scryptKeyLen            = 32
 	scryptSaltLen           = 16
-	scryptNMin              = 1 << 14
+	scryptNMin              = 1 << 14 // allow containers created with N=16384 to still load
 	scryptNMax              = 1 << 20
 	scryptRMax              = 64
 	scryptPMax              = 3
@@ -233,16 +233,10 @@ func deriveKeyScrypt(passphrase string, salt []byte, n, r, p int) ([]byte, error
 		return nil, err
 	}
 
-	// maxmem mirrors the Python hashlib.scrypt maxmem heuristic.
-	maxmem := 256 * n * r * p
-	if maxmem < 64*1024*1024 {
-		maxmem = 64 * 1024 * 1024
-	}
-
+	// golang.org/x/crypto/scrypt does not accept a maxmem parameter; enforcement is via scryptN/scryptR/scryptP bounds checks above.
 	key, err := scrypt.Key([]byte(passphrase), salt, n, r, p, scryptKeyLen)
 	if err != nil {
 		return nil, fmt.Errorf("secrets: scrypt KDF: %w", err)
 	}
-	_ = maxmem // used for documentation / future enforcement
 	return key, nil
 }

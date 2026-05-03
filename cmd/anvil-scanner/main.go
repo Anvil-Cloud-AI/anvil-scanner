@@ -6,18 +6,20 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/ai"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/backup"
-	iexec "github.com/Anvil-Cloud-AI/anvil-scanner/internal/exec"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/openclaw"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/report"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/scan"
@@ -41,6 +43,7 @@ func run(args []string) error {
 	fs.SetOutput(os.Stderr)
 
 	showVersion   := fs.Bool("version", false, "Print version and exit")
+	fs.BoolVar(showVersion, "v", false, "")
 	noAI          := fs.Bool("no-ai", false, "Skip AI risk analysis")
 	doThreatIntel := fs.Bool("threat-intel", false, "Run threat intelligence checks (Shodan, AbuseIPDB, CVE, CISA KEV, local IoC)")
 	noOpenClaw    := fs.Bool("no-openclaw", false, "Skip OpenClaw security audit")
@@ -65,12 +68,6 @@ func run(args []string) error {
 		return err
 	}
 
-	for _, a := range args {
-		if a == "--version" || a == "-version" || a == "-v" {
-			fmt.Println("anvil-scanner", Version)
-			return nil
-		}
-	}
 	if *showVersion {
 		fmt.Println("anvil-scanner", Version)
 		return nil
@@ -118,7 +115,13 @@ func run(args []string) error {
 	if os.Getuid() == 0 {
 		fmt.Fprintln(os.Stderr, "⚠  WARNING: Running as root.")
 		fmt.Fprintln(os.Stderr, "   Most checks do not require root and run correctly as a normal user.")
-		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		sudoUser := os.Getenv("SUDO_USER")
+		if sudoUser != "" {
+			if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_.\-]{1,64}$`, sudoUser); !matched {
+				sudoUser = ""
+			}
+		}
+		if sudoUser != "" {
 			fmt.Fprintf(os.Stderr, "   (detected sudo from user: %s — reports will be owned by that user)\n", sudoUser)
 		} else {
 			fmt.Fprintln(os.Stderr, "   Reports will be written to root's home directory unless you use --html.")
@@ -205,7 +208,7 @@ func run(args []string) error {
 	} else {
 		fmt.Fprintf(progress, "\nRunning AI analysis via %s...\n", aiProviderName)
 		prompt := ai.BuildPrompt(scan.Platform(), openPorts, pendingUpdates, len(report.PriorityFindings(result.Checks)))
-		analysis = ai.Analyze(prompt, false)
+		analysis = ai.Analyze(context.Background(), prompt, false, aiProvider)
 		if analysis.Error != "" {
 			fmt.Fprintf(os.Stderr, "AI analysis error: %s\n", analysis.Error)
 		} else if analysis.RiskScore != nil {
@@ -401,11 +404,17 @@ type userInfo struct {
 // On macOS regular users are not in /etc/passwd, so we fall back to id(1).
 func effectiveUser() userInfo {
 	if os.Getuid() == 0 {
-		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		sudoUser := os.Getenv("SUDO_USER")
+		if sudoUser != "" {
+			if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_.\-]{1,64}$`, sudoUser); !matched {
+				sudoUser = ""
+			}
+		}
+		if sudoUser != "" {
 			if info, err := lookupPasswd(sudoUser); err == nil {
 				return info
 			}
-			// /etc/passwd missing the user (common on macOS) — ask id(1).
+			// /etc/passwd missing the user (common on macOS) — use os/user.Lookup.
 			if info, err := lookupByID(sudoUser); err == nil {
 				return info
 			}
@@ -440,29 +449,23 @@ func lookupPasswd(username string) (userInfo, error) {
 	return userInfo{}, fmt.Errorf("user %q not found in /etc/passwd", username)
 }
 
-// lookupByID resolves uid and gid via id(1), which works on macOS and Linux
-// regardless of whether the user appears in /etc/passwd.
+// lookupByID resolves uid, gid, and home via os/user.Lookup, which works on
+// macOS and Linux regardless of whether the user appears in /etc/passwd.
+// The username must already be validated before this function is called.
 func lookupByID(username string) (userInfo, error) {
-	uidRes := iexec.Run("id", "-u", username)
-	if !uidRes.Success() {
-		return userInfo{}, fmt.Errorf("id -u %s failed: %w", username, uidRes.Err)
-	}
-	gidRes := iexec.Run("id", "-g", username)
-	if !gidRes.Success() {
-		return userInfo{}, fmt.Errorf("id -g %s failed: %w", username, gidRes.Err)
-	}
-	uidOut := strings.TrimSpace(uidRes.Stdout)
-	gidOut := strings.TrimSpace(gidRes.Stdout)
-	uid, err := strconv.Atoi(uidOut)
+	u, err := user.Lookup(username)
 	if err != nil {
-		return userInfo{}, fmt.Errorf("id -u returned non-integer: %q", uidOut)
+		return userInfo{}, fmt.Errorf("user.Lookup %q: %w", username, err)
 	}
-	gid, err := strconv.Atoi(gidOut)
+	uid, err := strconv.Atoi(u.Uid)
 	if err != nil {
-		return userInfo{}, fmt.Errorf("id -g returned non-integer: %q", gidOut)
+		return userInfo{}, fmt.Errorf("user.Lookup %q: non-integer uid %q", username, u.Uid)
 	}
-	// $HOME is preserved by sudo in most configurations.
-	home, _ := os.UserHomeDir()
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return userInfo{}, fmt.Errorf("user.Lookup %q: non-integer gid %q", username, u.Gid)
+	}
+	home := u.HomeDir
 	if home == "" || home == "/var/root" {
 		home = filepath.Join("/Users", username) // macOS fallback
 	}

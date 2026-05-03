@@ -124,19 +124,27 @@ func getPkgVersion(pkg string) string {
 	return ""
 }
 
+// normalizeVersion strips epoch prefixes (e.g. "1:2.0" -> "2.0"), pre-release
+// suffixes after '-', and build metadata after '+', leaving a plain dotted
+// numeric version string suitable for comparison.
+func normalizeVersion(v string) string {
+	// Strip epoch (e.g. "2:1.0.3" -> "1.0.3")
+	if idx := strings.Index(v, ":"); idx >= 0 {
+		v = v[idx+1:]
+	}
+	// Take only the portion before the first '-' (Debian revision / pre-release).
+	v = strings.SplitN(v, "-", 2)[0]
+	// Strip +build metadata.
+	v = strings.SplitN(v, "+", 2)[0]
+	return v
+}
+
 // versionLT returns true when installed < threshold. It strips epoch prefixes
 // (e.g. "1:9.7p1") and pre-release suffixes, then compares numeric dotted
 // segments. No external packages are used.
 func versionLT(installed, threshold string) bool {
 	norm := func(v string) []int {
-		// Strip epoch (e.g. "2:1.0.3" -> "1.0.3")
-		if idx := strings.Index(v, ":"); idx >= 0 {
-			v = v[idx+1:]
-		}
-		// Take only the portion before the first '-' (pre-release/build suffix).
-		v = strings.SplitN(v, "-", 2)[0]
-		// Also strip +build metadata.
-		v = strings.SplitN(v, "+", 2)[0]
+		v = normalizeVersion(v)
 
 		digitRE := regexp.MustCompile(`^(\d+)`)
 		var parts []int
@@ -195,10 +203,7 @@ func CheckCVEExposure() CVEResult {
 			// Special handling for XZ Utils supply-chain backdoor: the
 			// backdoor was *in* 5.6.0-5.6.1, not in versions below 5.6.0.
 			if cve.CVE == "CVE-2024-3094" {
-				norm := version
-				norm = strings.SplitN(norm, ":", 2)[len(strings.SplitN(norm, ":", 2))-1]
-				norm = strings.SplitN(norm, "-", 2)[0]
-				norm = strings.SplitN(norm, "+", 2)[0]
+				norm := normalizeVersion(version)
 				if norm == "5.6.0" || norm == "5.6.1" {
 					fix := fmt.Sprintf("Upgrade %s immediately — this version contains a known backdoor", pkg)
 					findings = append(findings, CVEFinding{

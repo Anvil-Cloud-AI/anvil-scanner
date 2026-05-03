@@ -1,13 +1,11 @@
 // Package scan implements the check engine and platform-specific
-// hardening checks. It is the Go port of python/anvil_scanner/scanner.py.
+// hardening checks.
 //
 // The primary types exported here are Status, Severity, Check, and
 // CheckBuilder. Platform-specific files (ssh.go, macos.go, linux.go,
-// rpi.go) will land in subsequent phases and use CheckBuilder to
-// register results.
+// rpi.go) register findings via CheckBuilder.
 //
-// See docs/porting-checklist.md for the full check inventory and
-// python/anvil_scanner/scanner.py for the reference implementation.
+// See docs/porting-checklist.md for the full check inventory.
 package scan
 
 import (

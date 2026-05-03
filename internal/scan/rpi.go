@@ -320,10 +320,12 @@ func rpi008Swap(b *CheckBuilder) {
 	if !res.Success() {
 		return // not enough info — silently skip (matches Python behavior)
 	}
+	found := false
 	for _, line := range strings.Split(res.Stdout, "\n") {
 		if !strings.HasPrefix(line, "Swap:") {
 			continue
 		}
+		found = true
 		parts := strings.Fields(line)
 		if len(parts) < 2 {
 			break
@@ -349,6 +351,10 @@ func rpi008Swap(b *CheckBuilder) {
 		}
 		break
 	}
+	if !found {
+		b.Skip("RPI-008", "Swap space configured",
+			"No swap information available from `free -m`", SeverityMedium)
+	}
 }
 
 func rpi009GPUMemory(b *CheckBuilder) {
@@ -362,11 +368,15 @@ func rpi009GPUMemory(b *CheckBuilder) {
 		}
 	}
 	if configPath == "" {
+		b.Skip("RPI-009", "GPU memory optimized for server",
+			"Boot config not found — cannot check GPU memory split", SeverityLow)
 		return
 	}
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
+		b.Skip("RPI-009", "GPU memory optimized for server",
+			"Boot config not found — cannot check GPU memory split", SeverityLow)
 		return
 	}
 
@@ -398,6 +408,11 @@ func rpi009GPUMemory(b *CheckBuilder) {
 }
 
 func rpi010HardwareInterfaces(b *CheckBuilder) {
+	if _, err := os.Stat("/dev"); err != nil {
+		b.Skip("RPI-010", "Unnecessary hardware interfaces disabled",
+			"Cannot access /dev — unable to check hardware interface status", SeverityLow)
+		return
+	}
 	var enabled []string
 	_, i2c1 := os.Stat("/dev/i2c-1")
 	_, i2c0 := os.Stat("/dev/i2c-0")

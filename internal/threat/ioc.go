@@ -65,6 +65,21 @@ var cronSuspiciousPatterns = []struct {
 // normalCommentRE matches a typical SSH key comment (user@host).
 var normalCommentRE = regexp.MustCompile(`^[\w.+-]+@[\w.-]+$`)
 
+// keyIPRE matches an IP-address-like key comment.
+var keyIPRE = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}`)
+
+// keyCommentRE matches a valid (non-suspicious) key comment character set.
+var keyCommentRE = regexp.MustCompile(`^[\w.@+-]+$`)
+
+// portLineRE matches a listening IPv4-wildcard socket line from ss output.
+var portLineRE = regexp.MustCompile(`(?:0\.0\.0\.0|\*):(\d+)\s`)
+
+// authFromIPRE extracts the remote IP from an auth log "Accepted" line.
+var authFromIPRE = regexp.MustCompile(`from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})`)
+
+// authSudoRE extracts the sudo invoking user from a sudo log line.
+var authSudoRE = regexp.MustCompile(`sudo:\s+(\w+)\s+:`)
+
 // CheckLocalIOC scans the local system for common post-exploit indicators of
 // compromise. All filesystem operations are read-only.
 func CheckLocalIOC() LocalIOCResult {
@@ -171,8 +186,8 @@ func checkLinuxProcesses(result *LocalIOCResult) {
 	if err != nil {
 		return
 	}
+	defer procDir.Close()
 	entries, err := procDir.Readdirnames(-1)
-	procDir.Close()
 	if err != nil {
 		return
 	}
@@ -487,9 +502,9 @@ func checkSSHKeys(result *LocalIOCResult) {
 				comment := parts[len(parts)-1]
 				if !normalCommentRE.MatchString(comment) {
 					// Check if it looks like an IP address.
-					if net.ParseIP(comment) != nil || regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}`).MatchString(comment) {
+					if net.ParseIP(comment) != nil || keyIPRE.MatchString(comment) {
 						flags = append(flags, fmt.Sprintf("Key with IP address comment: %s", comment))
-					} else if len(comment) > 40 || !regexp.MustCompile(`^[\w.@+-]+$`).MatchString(comment) {
+					} else if len(comment) > 40 || !keyCommentRE.MatchString(comment) {
 						if len(comment) > 60 {
 							comment = comment[:60]
 						}
@@ -518,7 +533,7 @@ func checkListeningPorts(result *LocalIOCResult) {
 	if res.Success() {
 		lines := strings.Split(res.Stdout, "\n")
 		for _, line := range lines[1:] { // skip header
-			m := regexp.MustCompile(`(?:0\.0\.0\.0|\*):(\d+)\s`).FindStringSubmatch(line)
+			m := portLineRE.FindStringSubmatch(line)
 			if m == nil {
 				continue
 			}
@@ -615,9 +630,8 @@ func checkAuthLog(result *LocalIOCResult) {
 	lines := allLines[start:]
 
 	failedSSH := 0
-	privateIPRE := regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`)
-	fromIPRE := regexp.MustCompile(`from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})`)
-	sudoRE := regexp.MustCompile(`sudo:\s+(\w+)\s+:`)
+	fromIPRE := authFromIPRE
+	sudoRE := authSudoRE
 
 	for _, line := range lines {
 		if strings.Contains(line, "Failed password") ||
@@ -628,7 +642,8 @@ func checkAuthLog(result *LocalIOCResult) {
 		if strings.Contains(line, "Accepted ") {
 			if m := fromIPRE.FindStringSubmatch(line); m != nil {
 				loginIP := m[1]
-				if privateIPRE.MatchString(loginIP) && !isPrivateIP(loginIP) {
+				// Flag logins from public IPs (non-RFC-1918/loopback/link-local).
+				if !isPrivateIP(loginIP) {
 					result.AuthAnomalies = append(result.AuthAnomalies,
 						fmt.Sprintf("Successful login from external IP %s", loginIP))
 				}

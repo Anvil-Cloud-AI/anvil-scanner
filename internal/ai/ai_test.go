@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -137,7 +138,7 @@ func TestParseResponse_InvalidJSON(t *testing.T) {
 
 // TestAnalyze_SkipReturnsSkipResult verifies that skip=true short-circuits.
 func TestAnalyze_SkipReturnsSkipResult(t *testing.T) {
-	a := Analyze("ignored prompt", true)
+	a := Analyze(context.Background(), "ignored prompt", true, ProviderNone)
 	if !a.Skipped {
 		t.Error("expected Skipped=true")
 	}
@@ -155,7 +156,7 @@ func TestAnalyze_NoneProviderLoudBanner(t *testing.T) {
 	os.Unsetenv("GROK_KEY")
 	t.Setenv("OLLAMA_URL", "http://127.0.0.1:19999")
 
-	a := Analyze("prompt", false)
+	a := Analyze(context.Background(), "prompt", false, ProviderNone)
 	if a.Skipped {
 		t.Error("NO_PROVIDER should set Error, not Skipped — it's a loud banner, not a quiet skip")
 	}

@@ -3,15 +3,18 @@
 package secrets
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
+
+	"golang.org/x/term"
 
 	iexec "github.com/Anvil-Cloud-AI/anvil-scanner/internal/exec"
 )
@@ -148,9 +151,6 @@ func hasKeyring() bool {
 // When confirm is true (encrypt path) the passphrase must be at least
 // minPassphraseLen characters long and the user must enter it twice.
 //
-// NOTE: stdin input is NOT hidden (no raw-mode / echo suppression).
-// A future version should use golang.org/x/term.ReadPassword for echo-
-// suppression; for now we use a plain bufio reader.
 func promptPassphrase(confirm bool) (string, error) {
 	// Env-var path — always wins, no prompts.
 	if env := os.Getenv("ANVIL_SECRETS_PASSPHRASE"); env != "" {
@@ -160,27 +160,26 @@ func promptPassphrase(confirm bool) (string, error) {
 		return env, nil
 	}
 
-	// Interactive stdin path.
-	reader := bufio.NewReader(os.Stdin)
-
+	// Interactive stdin path — echo-suppressed via golang.org/x/term.
 	fmt.Fprint(os.Stderr, "Enter secrets passphrase: ")
-	pw, err := reader.ReadString('\n')
+	pwBytes, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Fprintln(os.Stderr) // newline after hidden input
 	if err != nil {
 		return "", fmt.Errorf("secrets: reading passphrase: %w", err)
 	}
-	pw = strings.TrimRight(pw, "\r\n")
+	pw := string(pwBytes)
 
 	if confirm {
 		if len(pw) < minPassphraseLen {
 			return "", fmt.Errorf("secrets: passphrase must be at least %d characters", minPassphraseLen)
 		}
 		fmt.Fprint(os.Stderr, "Confirm passphrase: ")
-		pw2, err := reader.ReadString('\n')
+		pw2Bytes, err := term.ReadPassword(int(syscall.Stdin))
+		fmt.Fprintln(os.Stderr) // newline after hidden input
 		if err != nil {
 			return "", fmt.Errorf("secrets: reading passphrase confirmation: %w", err)
 		}
-		pw2 = strings.TrimRight(pw2, "\r\n")
-		if pw != pw2 {
+		if pw != string(pw2Bytes) {
 			return "", errors.New("secrets: passphrases do not match")
 		}
 	}
@@ -206,7 +205,7 @@ func loadFileKey(keyFile string) ([]byte, error) {
 // storeFileKey writes the 32-byte AES master key to keyFile with 0600
 // permissions.  The file is created if absent, truncated if present.
 func storeFileKey(keyFile string, key []byte) error {
-	if err := os.WriteFile(keyFile, key, 0600); err != nil {
+	if err := os.WriteFile(keyFile, key, 0o600); err != nil {
 		return fmt.Errorf("secrets: write key file %s: %w", keyFile, err)
 	}
 	return nil
@@ -221,6 +220,9 @@ func storeFileKey(keyFile string, key []byte) error {
 // plaintext secret values directly (useful for tools that read the keyring
 // without going through the container).
 func storeKeyringSecret(name, value string) error {
+	if matched, _ := regexp.MatchString(`^[A-Z0-9_]+$`, name); !matched {
+		return fmt.Errorf("secrets: invalid key name %q", name)
+	}
 	account := keyringAccount + "/" + name
 	switch runtime.GOOS {
 	case "darwin":
@@ -252,6 +254,9 @@ func storeKeyringSecret(name, value string) error {
 // loadKeyringSecret retrieves an individual secret value from the OS credential
 // store.  Returns ("", false) when the entry is absent.
 func loadKeyringSecret(name string) (string, bool) {
+	if matched, _ := regexp.MatchString(`^[A-Z0-9_]+$`, name); !matched {
+		return "", false
+	}
 	account := keyringAccount + "/" + name
 	switch runtime.GOOS {
 	case "darwin":

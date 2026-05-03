@@ -62,8 +62,8 @@ func MacOSRemoteLoginEnabled() *bool {
 // remoteLoginEnabled is the result of MacOSRemoteLoginEnabled(); pass
 // nil on Linux (SSH is always enabled there) or when the probe failed.
 //
-// See python/tests/test_refactor_guardrails.py::TestSshChecksSkippedWhenDisabled
-// for the behavioral contract this preserves.
+// Behavioral contract: when Remote Login is explicitly disabled on macOS,
+// all SSH checks are skipped rather than run against a non-running sshd.
 func SSHEnabled(platform string, remoteLoginEnabled *bool) bool {
 	if platform != "Darwin" {
 		return true
@@ -117,6 +117,9 @@ func parseSshdConfig() map[string]string {
 		}
 		result[strings.ToLower(key)] = val
 	}
+	if err := scanner.Err(); err != nil {
+		result["_error"] = fmt.Sprintf("read error: %v", err)
+	}
 	if hasIncludes {
 		result["_include"] = "sshd_config uses Include directives — some settings may be defined in included files and not shown here"
 	}
@@ -136,6 +139,7 @@ func checkSSHInt(
 	b *CheckBuilder,
 	cfg map[string]string,
 	id, name, key string,
+	trimSuffix bool,
 	testFn func(int) bool,
 	passMsgFn func(int) string,
 	failMsgFn func(int) string,
@@ -148,7 +152,10 @@ func checkSSHInt(
 		return
 	}
 	// LoginGraceTime may have a trailing "s"; strip it before parsing.
-	stripped := strings.TrimSuffix(val, "s")
+	stripped := val
+	if trimSuffix {
+		stripped = strings.TrimSuffix(val, "s")
+	}
 	iv, err := strconv.Atoi(stripped)
 	if err != nil {
 		b.Warn(id, name, fmt.Sprintf("%s value not parseable: %s", key, val), sev)
@@ -244,6 +251,7 @@ func RunSSHChecks(b *CheckBuilder, platform string, remoteLoginEnabled *bool) {
 
 	// SSH-006 — MaxAuthTries ≤ 4
 	checkSSHInt(b, cfg, "SSH-006", "MaxAuthTries ≤ 4", "MaxAuthTries",
+		false,
 		func(v int) bool { return v <= 4 },
 		func(v int) string { return fmt.Sprintf("MaxAuthTries = %d", v) },
 		func(v int) string { return fmt.Sprintf("MaxAuthTries = %d (should be ≤ 4)", v) },
@@ -253,6 +261,7 @@ func RunSSHChecks(b *CheckBuilder, platform string, remoteLoginEnabled *bool) {
 
 	// SSH-008 — LoginGraceTime ≤ 60s
 	checkSSHInt(b, cfg, "SSH-008", "LoginGraceTime ≤ 60s", "LoginGraceTime",
+		true,
 		func(v int) bool { return v <= 60 },
 		func(v int) string { return fmt.Sprintf("LoginGraceTime = %ds", v) },
 		func(v int) string { return fmt.Sprintf("LoginGraceTime = %ds (should be ≤ 60)", v) },
@@ -330,6 +339,7 @@ func RunSSHChecks(b *CheckBuilder, platform string, remoteLoginEnabled *bool) {
 
 	// SSH-021 — ClientAliveInterval set (> 0 means idle sessions time out)
 	checkSSHInt(b, cfg, "SSH-021", "ClientAliveInterval set", "ClientAliveInterval",
+		false,
 		func(v int) bool { return v > 0 },
 		func(v int) string { return fmt.Sprintf("ClientAliveInterval = %ds", v) },
 		func(_ int) string { return "ClientAliveInterval = 0 (disabled)" },
@@ -428,7 +438,7 @@ func checkSSHDirPerms() ([]string, error) {
 		}
 		home := parts[5]
 		shell := parts[6]
-		if (uid < 1000 && uid != 0) || strings.Contains(shell, "nologin") || strings.Contains(shell, "/false") {
+		if (uid < 500 && uid != 0) || strings.Contains(shell, "nologin") || strings.Contains(shell, "/false") {
 			continue
 		}
 		if _, err := os.Stat(home); err != nil {
@@ -493,9 +503,11 @@ func runSSH043(b *CheckBuilder) {
 	}
 
 	var bad []string
+	var skipped []string
 	for _, kf := range matches {
 		st, err := os.Stat(kf)
 		if err != nil {
+			skipped = append(skipped, filepath.Base(kf))
 			continue
 		}
 		mode := st.Mode().Perm()
@@ -503,10 +515,15 @@ func runSSH043(b *CheckBuilder) {
 			bad = append(bad, fmt.Sprintf("%s mode %04o", filepath.Base(kf), mode))
 		}
 	}
-	if len(bad) > 0 {
+	switch {
+	case len(bad) > 0:
 		b.Fail("SSH-043", "Host private key permissions (600)",
 			"Bad permissions: "+strings.Join(bad, "; "), SeverityCritical)
-	} else {
+	case len(skipped) > 0:
+		b.Warn("SSH-043", "Host private key permissions (600)",
+			fmt.Sprintf("Could not verify permissions on %d host key file(s) — re-run with sudo", len(skipped)),
+			SeverityCritical)
+	default:
 		b.Pass("SSH-043", "Host private key permissions (600)",
 			"All ssh_host_*_key files have mode 0600", SeverityCritical)
 	}

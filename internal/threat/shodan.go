@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 )
@@ -36,6 +37,10 @@ func CheckShodan(publicIP string) ShodanResult {
 		}
 	}
 
+	if net.ParseIP(publicIP) == nil {
+		return ShodanResult{Error: fmt.Sprintf("invalid public IP from ipify: %q", publicIP)}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -46,8 +51,7 @@ func CheckShodan(publicIP string) ShodanResult {
 	}
 	req.Header.Set("User-Agent", "anvil-scanner/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return ShodanResult{Error: fmt.Sprintf("Shodan query failed: %v", err)}
 	}
