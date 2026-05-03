@@ -11,6 +11,7 @@ package backup
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -173,7 +174,7 @@ func loadManifest(path string) (manifestData, error) {
 	}
 	var d manifestData
 	if err := json.Unmarshal(raw, &d); err != nil {
-		return manifestData{}, err
+		return manifestData{}, fmt.Errorf("backup: parse manifest %s: %w", path, err)
 	}
 	return d, nil
 }
@@ -221,7 +222,7 @@ func RevertSession(sessionDir string) (restored, failed int, err error) {
 	manifestPath := filepath.Join(sessionDir, "manifest.json")
 	data, err := loadManifest(manifestPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return 0, 0, nil
 		}
 		return 0, 0, err
@@ -550,27 +551,31 @@ func reloadSSHD(w io.Writer) {
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("backup: open %s: %w", src, err)
 	}
 	defer in.Close()
 
 	fi, err := in.Stat()
 	if err != nil {
-		return err
+		return fmt.Errorf("backup: stat %s: %w", src, err)
 	}
 
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return err
+		return fmt.Errorf("backup: create %s: %w", dst, err)
 	}
 
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
-		return err
+		_ = os.Remove(dst)
+		return fmt.Errorf("backup: copy %s → %s: %w", src, dst, err)
 	}
 	// Preserve original permissions (best-effort).
 	_ = os.Chmod(dst, fi.Mode())
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("backup: close %s: %w", dst, err)
+	}
+	return nil
 }
 
 // fmtFiles returns a pluralised count string, e.g. "1 file" or "3 files".

@@ -79,7 +79,7 @@ func generateUUID() string {
 	}
 	defer f.Close()
 	b := make([]byte, 16)
-	if _, err := f.Read(b); err != nil {
+	if _, err := io.ReadFull(f, b); err != nil {
 		return "00000000-0000-4000-8000-000000000000"
 	}
 	b[6] = (b[6] & 0x0f) | 0x40

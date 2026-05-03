@@ -178,7 +178,7 @@ func TestCallOllama_Non200ReturnsError(t *testing.T) {
 
 	t.Setenv("OLLAMA_URL", srv.URL)
 
-	_, err := callOllama("test prompt")
+	_, err := callOllama(context.Background(), "test prompt")
 	if err == nil {
 		t.Fatal("expected non-nil error for 404 response, got nil")
 	}

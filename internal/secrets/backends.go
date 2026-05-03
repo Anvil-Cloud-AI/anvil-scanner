@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/term"
 
@@ -25,7 +26,10 @@ const (
 	keyringService  = "anvil-scanner"
 	keyringAccount  = "anvil_scanner_master_key"
 	keyringDummyKey = "ANVILPROBE"
+	keyringTimeout  = 10 * time.Second
 )
+
+var validKeyNameRE = regexp.MustCompile(`^[A-Z0-9_]+$`)
 
 // storeKeyringMasterKey stores a base64-encoded 32-byte AES master key in
 // the OS credential store.
@@ -45,7 +49,8 @@ func storeKeyringMasterKey(key []byte) error {
 		return nil
 	default: // linux
 		// secret-tool reads the value from stdin.
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), keyringTimeout)
+		defer cancel()
 		r := iexec.RunCtx(ctx, strings.NewReader(encoded+"\n"),
 			"secret-tool", "store",
 			"--label="+keyringService,
@@ -220,7 +225,7 @@ func storeFileKey(keyFile string, key []byte) error {
 // plaintext secret values directly (useful for tools that read the keyring
 // without going through the container).
 func storeKeyringSecret(name, value string) error {
-	if matched, _ := regexp.MatchString(`^[A-Z0-9_]+$`, name); !matched {
+	if !validKeyNameRE.MatchString(name) {
 		return fmt.Errorf("secrets: invalid key name %q", name)
 	}
 	account := keyringAccount + "/" + name
@@ -237,7 +242,8 @@ func storeKeyringSecret(name, value string) error {
 		}
 		return nil
 	default: // linux
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), keyringTimeout)
+		defer cancel()
 		r := iexec.RunCtx(ctx, strings.NewReader(value+"\n"),
 			"secret-tool", "store",
 			"--label="+keyringService+"/"+name,
@@ -254,7 +260,7 @@ func storeKeyringSecret(name, value string) error {
 // loadKeyringSecret retrieves an individual secret value from the OS credential
 // store.  Returns ("", false) when the entry is absent.
 func loadKeyringSecret(name string) (string, bool) {
-	if matched, _ := regexp.MatchString(`^[A-Z0-9_]+$`, name); !matched {
+	if !validKeyNameRE.MatchString(name) {
 		return "", false
 	}
 	account := keyringAccount + "/" + name

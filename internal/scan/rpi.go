@@ -129,6 +129,12 @@ func rpi001DefaultPassword(b *CheckBuilder) {
 			break
 		}
 	}
+	if err := s.Err(); err != nil {
+		b.Warn("RPI-001", "Default 'pi' user password",
+			fmt.Sprintf("Error reading /etc/shadow: %v — verify manually: sudo passwd pi", err),
+			SeverityCritical)
+		return
+	}
 
 	if !found {
 		b.Pass("RPI-001", "Default 'pi' user password",
@@ -321,22 +327,28 @@ func rpi007AutoLogin(b *CheckBuilder) {
 func rpi008Swap(b *CheckBuilder) {
 	res := exec.Run("free", "-m")
 	if !res.Success() {
-		return // not enough info — silently skip (matches Python behavior)
+		b.Skip("RPI-008", "Swap space configured",
+			"Could not run 'free -m' — swap status unknown", SeverityMedium)
+		return
 	}
 	found := false
 	for _, line := range strings.Split(res.Stdout, "\n") {
 		if !strings.HasPrefix(line, "Swap:") {
 			continue
 		}
-		found = true
 		parts := strings.Fields(line)
 		if len(parts) < 2 {
-			break
+			b.Skip("RPI-008", "Swap space configured",
+				"Could not parse swap line from 'free -m'", SeverityMedium)
+			return
 		}
 		total, err := strconv.Atoi(parts[1])
 		if err != nil {
-			break
+			b.Skip("RPI-008", "Swap space configured",
+				"Could not parse swap size from 'free -m'", SeverityMedium)
+			return
 		}
+		found = true
 		switch {
 		case total == 0:
 			b.Warn("RPI-008", "Swap space configured",

@@ -45,7 +45,25 @@ const (
 	defaultGrokModel   = "grok-3-mini"
 	defaultXAIURL      = "https://api.x.ai/v1"
 	ollamaProbeTimeout = 500 * time.Millisecond
+	providerCallTimeout = 120 * time.Second
+	maxResponseBody     = 1 << 20 // 1 MiB
+	maxErrorSnippet     = 200
 )
+
+// privateCIDRs is initialised once and reused by validateExternalAPIURL.
+var privateCIDRs []*net.IPNet
+
+func init() {
+	for _, cidr := range []string{
+		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+		"127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7",
+	} {
+		_, n, err := net.ParseCIDR(cidr)
+		if err == nil {
+			privateCIDRs = append(privateCIDRs, n)
+		}
+	}
+}
 
 // Analysis holds the result of an AI risk analysis pass.
 type Analysis struct {
@@ -153,7 +171,7 @@ func Analyze(ctx context.Context, prompt string, skip bool, provider Provider) A
 		}
 	}
 
-	raw, err := callProvider(provider, prompt)
+	raw, err := callProvider(ctx, provider, prompt)
 	if err != nil {
 		return Analysis{Provider: provider, Error: err.Error()}
 	}
@@ -208,22 +226,12 @@ func validateExternalAPIURL(rawURL string) error {
 		// Cannot resolve — treat as safe (DNS failure at config time should not block startup).
 		return nil
 	}
-	private := []*net.IPNet{}
-	for _, cidr := range []string{
-		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-		"127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7",
-	} {
-		_, n, e := net.ParseCIDR(cidr)
-		if e == nil {
-			private = append(private, n)
-		}
-	}
 	for _, addr := range addrs {
 		ip := net.ParseIP(addr)
 		if ip == nil {
 			continue
 		}
-		for _, n := range private {
+		for _, n := range privateCIDRs {
 			if n.Contains(ip) {
 				return fmt.Errorf("URL resolves to a private/internal address (%s): SSRF risk", addr)
 			}
@@ -232,14 +240,14 @@ func validateExternalAPIURL(rawURL string) error {
 	return nil
 }
 
-func callProvider(provider Provider, prompt string) (string, error) {
+func callProvider(ctx context.Context, provider Provider, prompt string) (string, error) {
 	switch provider {
 	case ProviderOllama:
-		return callOllama(prompt)
+		return callOllama(ctx, prompt)
 	case ProviderClaude:
-		return callClaude(prompt)
+		return callClaude(ctx, prompt)
 	case ProviderOpenAI:
-		return callOpenAI(prompt, defaultOpenAIModel, os.Getenv("OPENAI_KEY"), "https://api.openai.com/v1")
+		return callOpenAI(ctx, prompt, defaultOpenAIModel, os.Getenv("OPENAI_KEY"), "https://api.openai.com/v1")
 	case ProviderGrok:
 		base := os.Getenv("XAI_API_URL")
 		if base == "" {
@@ -248,13 +256,13 @@ func callProvider(provider Provider, prompt string) (string, error) {
 		if err := validateExternalAPIURL(base); err != nil {
 			return "", fmt.Errorf("XAI_API_URL rejected: %w", err)
 		}
-		return callOpenAI(prompt, defaultGrokModel, os.Getenv("GROK_KEY"), base)
+		return callOpenAI(ctx, prompt, defaultGrokModel, os.Getenv("GROK_KEY"), base)
 	default:
 		return "", fmt.Errorf("unknown provider: %s", provider)
 	}
 }
 
-func callOllama(prompt string) (string, error) {
+func callOllama(ctx context.Context, prompt string) (string, error) {
 	ollamaBase := defaultOllamaURL
 	if u := os.Getenv("OLLAMA_URL"); u != "" {
 		ollamaBase = u
@@ -277,12 +285,12 @@ func callOllama(prompt string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/generate",
 		bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create ollama request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -291,19 +299,19 @@ func callOllama(prompt string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("ollama API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorSnippet))
+		return "", fmt.Errorf("ollama API error %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
 	var result struct {
 		Response string `json:"response"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(&result); err != nil {
 		return "", fmt.Errorf("ollama response parse error: %w", err)
 	}
 	return result.Response, nil
 }
 
-func callClaude(prompt string) (string, error) {
+func callClaude(ctx context.Context, prompt string) (string, error) {
 	key := os.Getenv("CLAUDE_KEY")
 	if key == "" {
 		return "", fmt.Errorf("CLAUDE_KEY not set")
@@ -323,12 +331,12 @@ func callClaude(prompt string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://api.anthropic.com/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create claude request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", key)
@@ -338,14 +346,14 @@ func callClaude(prompt string) (string, error) {
 		return "", fmt.Errorf("claude request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
-		return "", fmt.Errorf("read response: %v", err)
+		return "", fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		snippet := string(respBody)
-		if len(snippet) > 200 {
-			snippet = snippet[:200] + "..."
+		if len(snippet) > maxErrorSnippet {
+			snippet = snippet[:maxErrorSnippet] + "..."
 		}
 		return "", fmt.Errorf("claude API error %d: %s", resp.StatusCode, snippet)
 	}
@@ -364,7 +372,7 @@ func callClaude(prompt string) (string, error) {
 }
 
 // callOpenAI handles OpenAI-compatible APIs (OpenAI + xAI Grok).
-func callOpenAI(prompt, model, key, baseURL string) (string, error) {
+func callOpenAI(ctx context.Context, prompt, model, key, baseURL string) (string, error) {
 	if key == "" {
 		return "", fmt.Errorf("API key not set")
 	}
@@ -382,12 +390,12 @@ func callOpenAI(prompt, model, key, baseURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create API request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
@@ -396,14 +404,14 @@ func callOpenAI(prompt, model, key, baseURL string) (string, error) {
 		return "", fmt.Errorf("API request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
-		return "", fmt.Errorf("read response: %v", err)
+		return "", fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		snippet := string(respBody)
-		if len(snippet) > 200 {
-			snippet = snippet[:200] + "..."
+		if len(snippet) > maxErrorSnippet {
+			snippet = snippet[:maxErrorSnippet] + "..."
 		}
 		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, snippet)
 	}
