@@ -53,6 +53,13 @@ const (
 // privateCIDRs is initialised once and reused by validateExternalAPIURL.
 var privateCIDRs []*net.IPNet
 
+// ssrfSafeTransport closes the DNS-rebinding TOCTOU window by re-validating
+// the resolved IP at DialContext time rather than only at validation time.
+// Used by callOpenAI so a user-supplied XAI_API_URL cannot be redirected to
+// a private address between the pre-flight validateExternalAPIURL check and
+// the actual HTTP connection.
+var ssrfSafeTransport *http.Transport
+
 func init() {
 	for _, cidr := range []string{
 		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
@@ -62,6 +69,35 @@ func init() {
 		if err == nil {
 			privateCIDRs = append(privateCIDRs, n)
 		}
+	}
+
+	baseDialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	ssrfSafeTransport = &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("parse dial addr: %w", err)
+			}
+			ips, err := net.DefaultResolver.LookupHost(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("resolve %s: %w", host, err)
+			}
+			for _, ipStr := range ips {
+				ip := net.ParseIP(ipStr)
+				if ip == nil {
+					continue
+				}
+				for _, n := range privateCIDRs {
+					if n.Contains(ip) {
+						return nil, fmt.Errorf("SSRF guard: %s resolves to private address %s", host, ipStr)
+					}
+				}
+			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("no addresses resolved for %s", host)
+			}
+			return baseDialer.DialContext(ctx, network, net.JoinHostPort(ips[0], port))
+		},
 	}
 }
 
@@ -399,7 +435,7 @@ func callOpenAI(ctx context.Context, prompt, model, key, baseURL string) (string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Transport: ssrfSafeTransport}).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("API request failed: %w", err)
 	}

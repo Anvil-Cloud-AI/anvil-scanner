@@ -41,7 +41,10 @@ func TestBuildPlist_XMLEscapesSpecialChars(t *testing.T) {
 }
 
 func TestCronEntry_Format(t *testing.T) {
-	entry := cronEntry("/usr/local/bin/anvil-scanner")
+	entry, err := cronEntry("/usr/local/bin/anvil-scanner")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if !strings.HasPrefix(entry, "0 * * * *") {
 		t.Errorf("expected hourly cron schedule, got: %s", entry)
 	}
@@ -53,6 +56,15 @@ func TestCronEntry_Format(t *testing.T) {
 	}
 	if !strings.Contains(entry, "--no-ai") {
 		t.Errorf("expected --no-ai flag in entry: %s", entry)
+	}
+}
+
+func TestCronEntry_RejectsUnsafePath(t *testing.T) {
+	for _, bad := range []string{`/usr/"bin/anvil`, `/usr/\bin/anvil`} {
+		_, err := cronEntry(bad)
+		if err == nil {
+			t.Errorf("expected error for unsafe path %q", bad)
+		}
 	}
 }
 

@@ -466,7 +466,7 @@ func checkSSHKeys(result *LocalIOCResult) {
 	addPath("/root/.ssh/authorized_keys")
 
 	// Parse /etc/passwd for home directories.
-	passwdData, err := os.ReadFile("/etc/passwd")
+	passwdData, err := readFileCapped("/etc/passwd", 1*1024*1024)
 	if err == nil {
 		for _, line := range strings.Split(string(passwdData), "\n") {
 			parts := strings.Split(line, ":")

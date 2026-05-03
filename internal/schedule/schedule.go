@@ -164,12 +164,18 @@ func removeMacOS() error {
 // The binary path is double-quoted so paths containing spaces are handled
 // correctly by cron(8). Single quotes are not used because the path itself
 // might contain a single quote (unusual but possible).
-func cronEntry(binaryPath string) string {
-	return fmt.Sprintf(`0 * * * * "%s" --no-ai  %s`, binaryPath, cronComment)
+func cronEntry(binaryPath string) (string, error) {
+	if strings.ContainsAny(binaryPath, "\"\\") {
+		return "", fmt.Errorf("binary path contains characters unsafe for cron quoting: %s", binaryPath)
+	}
+	return fmt.Sprintf(`0 * * * * "%s" --no-ai  %s`, binaryPath, cronComment), nil
 }
 
 func setupLinux(binaryPath string, dryRun bool) error {
-	entry := cronEntry(binaryPath)
+	entry, err := cronEntry(binaryPath)
+	if err != nil {
+		return err
+	}
 
 	if dryRun {
 		fmt.Printf("[DRY-RUN] Would add crontab entry: %s\n", entry)
