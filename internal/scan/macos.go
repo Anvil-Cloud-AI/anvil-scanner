@@ -144,13 +144,18 @@ func macos005RemoteLogin(b *CheckBuilder) {
 
 // macos006ScreenSharing — Screen sharing service.
 // launchctl list com.apple.screensharing exits non-zero when the
-// service is not loaded → PASS.
+// service is not loaded → PASS. ExitCode -1 means launchctl is absent
+// (not a macOS system or run without a user session) → SKIP.
 func macos006ScreenSharing(b *CheckBuilder) {
 	res := exec.Run("launchctl", "list", "com.apple.screensharing")
-	if res.ExitCode != 0 {
+	switch {
+	case res.ExitCode == -1:
+		b.Skip("MACOS-006", "Screen sharing disabled",
+			"launchctl not available — cannot check screen sharing status", SeverityMedium)
+	case res.ExitCode != 0:
 		b.Pass("MACOS-006", "Screen sharing disabled",
 			"Screen sharing service not loaded", SeverityMedium)
-	} else {
+	default:
 		b.Warn("MACOS-006", "Screen sharing disabled",
 			"Screen sharing service appears to be loaded — verify this is intentional",
 			SeverityMedium)

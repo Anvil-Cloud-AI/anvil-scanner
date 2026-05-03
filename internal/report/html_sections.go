@@ -570,9 +570,3 @@ func renderThreatIntel(r *threat.Result) string {
 	return fmt.Sprintf(`    <section><h2>🛡️ Threat Intelligence</h2>%s</section>`, sections.String())
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

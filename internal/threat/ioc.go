@@ -157,7 +157,7 @@ func checkCronFiles(result *LocalIOCResult) {
 	}
 
 	for _, cf := range cronFiles {
-		data, err := os.ReadFile(cf)
+		data, err := readFileCapped(cf, 64*1024)
 		if err != nil {
 			continue
 		}
@@ -197,7 +197,7 @@ func checkLinuxProcesses(result *LocalIOCResult) {
 		if _, err := strconv.Atoi(name); err != nil {
 			continue
 		}
-		cmdlineBytes, err := os.ReadFile(fmt.Sprintf("/proc/%s/cmdline", name))
+		cmdlineBytes, err := readFileCapped(fmt.Sprintf("/proc/%s/cmdline", name), 8*1024)
 		if err != nil {
 			continue
 		}
@@ -320,7 +320,7 @@ func checkC2Connections(result *LocalIOCResult) {
 	}
 
 	for _, tcpFile := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
-		data, err := os.ReadFile(tcpFile)
+		data, err := readFileCapped(tcpFile, 1<<20)
 		if err != nil {
 			continue
 		}
@@ -436,6 +436,18 @@ func readMagicBytes(path string, n int) ([]byte, error) {
 	return buf[:nr], nil
 }
 
+// readFileCapped reads at most maxBytes from path. It is used instead of
+// os.ReadFile on user-controlled or potentially large files to prevent
+// excessive memory allocation from adversarially large file contents.
+func readFileCapped(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, maxBytes))
+}
+
 func checkSSHKeys(result *LocalIOCResult) {
 	sevenDaysAgo := time.Now().Add(-7 * 24 * time.Hour)
 
@@ -478,7 +490,7 @@ func checkSSHKeys(result *LocalIOCResult) {
 		}
 		akRecent := st.ModTime().After(sevenDaysAgo)
 
-		data, err := os.ReadFile(akPath)
+		data, err := readFileCapped(akPath, 512*1024)
 		if err != nil {
 			continue
 		}
@@ -554,7 +566,7 @@ func checkListeningPorts(result *LocalIOCResult) {
 	}
 
 	// Fall back to /proc/net/tcp.
-	data, err := os.ReadFile("/proc/net/tcp")
+	data, err := readFileCapped("/proc/net/tcp", 1<<20)
 	if err != nil {
 		return
 	}
@@ -629,9 +641,10 @@ func checkAuthLog(result *LocalIOCResult) {
 	}
 	lines := allLines[start:]
 
+	// Resolve the current login user once; used to whitelist sudo checks below.
+	currentUser, _ := currentUsername()
+
 	failedSSH := 0
-	fromIPRE := authFromIPRE
-	sudoRE := authSudoRE
 
 	for _, line := range lines {
 		if strings.Contains(line, "Failed password") ||
@@ -640,7 +653,7 @@ func checkAuthLog(result *LocalIOCResult) {
 		}
 
 		if strings.Contains(line, "Accepted ") {
-			if m := fromIPRE.FindStringSubmatch(line); m != nil {
+			if m := authFromIPRE.FindStringSubmatch(line); m != nil {
 				loginIP := m[1]
 				// Flag logins from public IPs (non-RFC-1918/loopback/link-local).
 				if !isPrivateIP(loginIP) {
@@ -650,8 +663,8 @@ func checkAuthLog(result *LocalIOCResult) {
 			}
 		}
 
-		if m := sudoRE.FindStringSubmatch(line); m != nil {
-			user := m[1]
+		if m := authSudoRE.FindStringSubmatch(line); m != nil {
+			usr := m[1]
 			knownSafe := map[string]bool{
 				"root": true, "admin": true, "ubuntu": true,
 				"debian": true, "ec2-user": true,
@@ -662,13 +675,12 @@ func checkAuthLog(result *LocalIOCResult) {
 					knownSafe[sudoUser] = true
 				}
 			}
-			// Add the current login user (equivalent to getpwuid(os.getuid()).pw_name).
-			if loginUser, err := currentUsername(); err == nil && loginUser != "" {
-				knownSafe[loginUser] = true
+			if currentUser != "" {
+				knownSafe[currentUser] = true
 			}
-			if !knownSafe[user] {
+			if !knownSafe[usr] {
 				result.AuthAnomalies = append(result.AuthAnomalies,
-					fmt.Sprintf("sudo used by non-standard user: %s", user))
+					fmt.Sprintf("sudo used by non-standard user: %s", usr))
 			}
 		}
 	}

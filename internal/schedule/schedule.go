@@ -110,8 +110,13 @@ func setupMacOS(binaryPath string, dryRun bool) error {
 	if err := os.MkdirAll(filepath.Dir(pp), 0o700); err != nil {
 		return fmt.Errorf("creating LaunchAgents dir: %w", err)
 	}
-	// Ensure log dir exists
-	home, _ := os.UserHomeDir()
+	// Ensure log dir exists. plistPath() already succeeds above so
+	// UserHomeDir() is unlikely to fail here, but propagate the error
+	// rather than silently using an empty home directory.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("getting home directory for log dir: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Join(home, ".anvil-scanner"), 0o700); err != nil {
 		return fmt.Errorf("creating log dir: %w", err)
 	}
@@ -156,8 +161,11 @@ func removeMacOS() error {
 }
 
 // cronEntry returns the crontab line to install.
+// The binary path is double-quoted so paths containing spaces are handled
+// correctly by cron(8). Single quotes are not used because the path itself
+// might contain a single quote (unusual but possible).
 func cronEntry(binaryPath string) string {
-	return fmt.Sprintf("0 * * * * %s --no-ai  %s", binaryPath, cronComment)
+	return fmt.Sprintf(`0 * * * * "%s" --no-ai  %s`, binaryPath, cronComment)
 }
 
 func setupLinux(binaryPath string, dryRun bool) error {

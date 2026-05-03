@@ -139,6 +139,8 @@ func normalizeVersion(v string) string {
 	return v
 }
 
+var digitRE = regexp.MustCompile(`^(\d+)`)
+
 // versionLT returns true when installed < threshold. It strips epoch prefixes
 // (e.g. "1:9.7p1") and pre-release suffixes, then compares numeric dotted
 // segments. No external packages are used.
@@ -146,7 +148,6 @@ func versionLT(installed, threshold string) bool {
 	norm := func(v string) []int {
 		v = normalizeVersion(v)
 
-		digitRE := regexp.MustCompile(`^(\d+)`)
 		var parts []int
 		for _, seg := range strings.Split(v, ".") {
 			m := digitRE.FindString(seg)
