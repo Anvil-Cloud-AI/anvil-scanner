@@ -4,6 +4,7 @@ package scan
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,10 +142,12 @@ func rpi001DefaultPassword(b *CheckBuilder) {
 	}
 
 	// Verify via python3 crypt — Go's stdlib has no crypt(3) binding.
-	// We use the same subprocess fallback the Python reference uses when
-	// the crypt import fails.
-	res := exec.Run("python3", "-c",
-		fmt.Sprintf("import crypt; print(crypt.crypt('raspberry', %q))", piHash))
+	// Pass the hash via stdin to avoid embedding /etc/shadow content in a
+	// -c argument string where %q Go-escapes rather than Python-escapes it.
+	ctx, cancel := context.WithTimeout(context.Background(), exec.DefaultTimeout)
+	defer cancel()
+	res := exec.RunCtx(ctx, strings.NewReader(piHash), "python3", "-c",
+		"import sys, crypt; print(crypt.crypt('raspberry', sys.stdin.read().strip()))")
 	switch {
 	case res.Success() && strings.TrimSpace(res.Stdout) == piHash:
 		b.Fail("RPI-001", "Default 'pi' user password",

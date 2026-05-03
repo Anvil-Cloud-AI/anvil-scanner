@@ -662,9 +662,6 @@ func checkAuthLog(result *LocalIOCResult) {
 					knownSafe[sudoUser] = true
 				}
 			}
-			if curUser := os.Getenv("USER"); curUser != "" {
-				knownSafe[curUser] = true
-			}
 			// Add the current login user (equivalent to getpwuid(os.getuid()).pw_name).
 			if loginUser, err := currentUsername(); err == nil && loginUser != "" {
 				knownSafe[loginUser] = true

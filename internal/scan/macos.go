@@ -169,8 +169,14 @@ func macos007AutoLogin(b *CheckBuilder) {
 		b.Pass("MACOS-007", "Automatic login disabled",
 			"No autoLoginUser set (automatic login is disabled)", SeverityMedium)
 	} else {
+		raw := strings.Map(func(r rune) rune {
+			if r < 32 || r == 127 {
+				return -1
+			}
+			return r
+		}, strings.TrimSpace(res.Stdout))
 		b.Fail("MACOS-007", "Automatic login disabled",
-			"Automatic login enabled for user: "+strings.TrimSpace(res.Stdout),
+			"Automatic login enabled for user: "+raw,
 			SeverityMedium)
 	}
 }

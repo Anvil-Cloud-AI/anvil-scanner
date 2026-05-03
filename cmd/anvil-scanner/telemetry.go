@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -144,7 +145,7 @@ func submitTelemetry(rd report.Data) {
 			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 		},
 	}
-	req, err := http.NewRequest("POST", telemetryEndpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", telemetryEndpoint, bytes.NewReader(body))
 	if err != nil {
 		return
 	}

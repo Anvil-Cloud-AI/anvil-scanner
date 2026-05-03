@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -188,6 +189,49 @@ Rules:
 `, platform, string(summaryJSON))
 }
 
+// validateExternalAPIURL checks that rawURL is HTTPS and that its hostname
+// does not resolve to a private, loopback, or link-local address (SSRF guard).
+func validateExternalAPIURL(rawURL string) error {
+	if !strings.HasPrefix(rawURL, "https://") {
+		return fmt.Errorf("URL must use HTTPS")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL has no host")
+	}
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		// Cannot resolve — treat as safe (DNS failure at config time should not block startup).
+		return nil
+	}
+	private := []*net.IPNet{}
+	for _, cidr := range []string{
+		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+		"127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7",
+	} {
+		_, n, e := net.ParseCIDR(cidr)
+		if e == nil {
+			private = append(private, n)
+		}
+	}
+	for _, addr := range addrs {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			continue
+		}
+		for _, n := range private {
+			if n.Contains(ip) {
+				return fmt.Errorf("URL resolves to a private/internal address (%s): SSRF risk", addr)
+			}
+		}
+	}
+	return nil
+}
+
 func callProvider(provider Provider, prompt string) (string, error) {
 	switch provider {
 	case ProviderOllama:
@@ -201,8 +245,8 @@ func callProvider(provider Provider, prompt string) (string, error) {
 		if base == "" {
 			base = defaultXAIURL
 		}
-		if !strings.HasPrefix(base, "https://") {
-			return "", fmt.Errorf("XAI_API_URL must use HTTPS")
+		if err := validateExternalAPIURL(base); err != nil {
+			return "", fmt.Errorf("XAI_API_URL rejected: %w", err)
 		}
 		return callOpenAI(prompt, defaultGrokModel, os.Getenv("GROK_KEY"), base)
 	default:
@@ -299,7 +343,11 @@ func callClaude(prompt string) (string, error) {
 		return "", fmt.Errorf("read response: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("claude API error %d: %s", resp.StatusCode, string(respBody))
+		snippet := string(respBody)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "..."
+		}
+		return "", fmt.Errorf("claude API error %d: %s", resp.StatusCode, snippet)
 	}
 	var result struct {
 		Content []struct {
@@ -353,7 +401,11 @@ func callOpenAI(prompt, model, key, baseURL string) (string, error) {
 		return "", fmt.Errorf("read response: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		snippet := string(respBody)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "..."
+		}
+		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, snippet)
 	}
 	var result struct {
 		Choices []struct {
