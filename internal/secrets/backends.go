@@ -253,6 +253,11 @@ func promptPassphrase(confirm bool) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("secrets: reading passphrase: %w", err)
 	}
+	defer func() {
+		for i := range pwBytes {
+			pwBytes[i] = 0
+		}
+	}()
 	pw := string(pwBytes)
 
 	if confirm {
@@ -265,6 +270,11 @@ func promptPassphrase(confirm bool) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("secrets: reading passphrase confirmation: %w", err)
 		}
+		defer func() {
+			for i := range pw2Bytes {
+				pw2Bytes[i] = 0
+			}
+		}()
 		if pw != string(pw2Bytes) {
 			return "", errors.New("secrets: passphrases do not match")
 		}

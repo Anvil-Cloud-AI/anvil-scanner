@@ -709,6 +709,9 @@ func checkMacOSTmpdir(result *LocalIOCResult) {
 	if macTmpDir == "" {
 		return
 	}
+	if !filepath.IsAbs(macTmpDir) {
+		return
+	}
 	fi, err := os.Stat(macTmpDir)
 	if err != nil || !fi.IsDir() {
 		return

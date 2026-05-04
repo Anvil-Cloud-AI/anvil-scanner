@@ -92,8 +92,8 @@ type Result struct {
 }
 
 // getPublicIP fetches the machine's public IP via ipify.
-func getPublicIP() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func getPublicIP(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.ipify.org", nil)
@@ -123,14 +123,14 @@ func getPublicIP() string {
 }
 
 // Scan runs all threat intelligence checks and returns a consolidated Result.
-func Scan() Result {
-	publicIP := getPublicIP()
+func Scan(ctx context.Context) Result {
+	publicIP := getPublicIP(ctx)
 
 	return Result{
-		Shodan:    CheckShodan(publicIP),
-		AbuseIPDB: CheckAbuseIPDB(publicIP),
+		Shodan:    CheckShodan(ctx, publicIP),
+		AbuseIPDB: CheckAbuseIPDB(ctx, publicIP),
 		LocalIOC:  CheckLocalIOC(),
 		CVE:       CheckCVEExposure(),
-		CISAKEV:   CheckCISAKEV(),
+		CISAKEV:   CheckCISAKEV(ctx),
 	}
 }

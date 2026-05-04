@@ -179,16 +179,21 @@ try:
     sys.exit(0)
 except ImportError:
     pass
-try:
-    from passlib.hash import sha512_crypt
-    if h.startswith('$6$'):
+if h.startswith('$6$'):
+    try:
+        from passlib.hash import sha512_crypt
         print('MATCH' if sha512_crypt.verify(pw, h) else 'NOMATCH')
-    else:
-        print('UNSUPPORTED')
-    sys.exit(0)
-except ImportError:
-    pass
-print('UNAVAILABLE')
+        sys.exit(0)
+    except ImportError:
+        pass
+if h.startswith('$y$'):
+    try:
+        from passlib.hash import yescrypt
+        print('MATCH' if yescrypt.verify(pw, h) else 'NOMATCH')
+        sys.exit(0)
+    except ImportError:
+        pass
+print('UNSUPPORTED')
 `
 	ctx, cancel := context.WithTimeout(context.Background(), exec.DefaultTimeout)
 	defer cancel()
@@ -553,20 +558,23 @@ func rpi012Throttle(b *CheckBuilder) {
 		return
 	}
 
-	flags := map[int64]string{
-		0x1:     "under-voltage detected NOW",
-		0x2:     "ARM frequency capped NOW",
-		0x4:     "currently throttled",
-		0x8:     "soft temperature limit active",
-		0x10000: "under-voltage occurred since boot",
-		0x20000: "ARM frequency capped since boot",
-		0x40000: "throttled since boot",
-		0x80000: "soft temp limit occurred since boot",
+	flags := []struct {
+		bit int64
+		msg string
+	}{
+		{0x1, "under-voltage detected NOW"},
+		{0x2, "ARM frequency capped NOW"},
+		{0x4, "currently throttled"},
+		{0x8, "soft temperature limit active"},
+		{0x10000, "under-voltage occurred since boot"},
+		{0x20000, "ARM frequency capped since boot"},
+		{0x40000, "throttled since boot"},
+		{0x80000, "soft temp limit occurred since boot"},
 	}
 	var issues []string
-	for bit, msg := range flags {
-		if val&int64(bit) != 0 {
-			issues = append(issues, msg)
+	for _, f := range flags {
+		if val&f.bit != 0 {
+			issues = append(issues, f.msg)
 		}
 	}
 	if len(issues) > 0 {

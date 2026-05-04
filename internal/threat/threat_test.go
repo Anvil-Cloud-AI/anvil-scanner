@@ -3,6 +3,7 @@
 package threat
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -128,7 +129,7 @@ func TestVersionLT(t *testing.T) {
 
 // TestShodanSkipsPrivateIP verifies that private IPs are skipped gracefully.
 func TestShodanSkipsPrivateIP(t *testing.T) {
-	result := CheckShodan("192.168.1.1")
+	result := CheckShodan(context.Background(), "192.168.1.1")
 	if !result.Skipped {
 		t.Errorf("expected Skipped=true for private IP, got Skipped=%v (SkipReason=%q)", result.Skipped, result.SkipReason)
 	}
@@ -136,7 +137,7 @@ func TestShodanSkipsPrivateIP(t *testing.T) {
 
 // TestShodanSkipsEmptyIP verifies that an empty IP string is skipped gracefully.
 func TestShodanSkipsEmptyIP(t *testing.T) {
-	result := CheckShodan("")
+	result := CheckShodan(context.Background(), "")
 	if !result.Skipped {
 		t.Errorf("expected Skipped=true for empty IP, got Skipped=%v (SkipReason=%q)", result.Skipped, result.SkipReason)
 	}
@@ -153,7 +154,7 @@ func TestAbuseIPDB_SkipsWhenNoKey(t *testing.T) {
 		}
 	}()
 
-	result := CheckAbuseIPDB("8.8.8.8")
+	result := CheckAbuseIPDB(context.Background(), "8.8.8.8")
 	if !result.Skipped {
 		t.Errorf("expected Skipped=true when ABUSEIPDB_KEY unset, got Skipped=%v", result.Skipped)
 	}
@@ -171,7 +172,7 @@ func TestScan_StructureIsValid(t *testing.T) {
 		}
 	}()
 
-	result := Scan()
+	result := Scan(context.Background())
 
 	// AbuseIPDB must be skipped (no key).
 	if !result.AbuseIPDB.Skipped {

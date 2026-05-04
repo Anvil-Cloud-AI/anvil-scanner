@@ -106,17 +106,17 @@ func parseSshdConfig() map[string]string {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// A line with leading whitespace inside a Match block — skip it.
-		if inMatchBlock && (strings.HasPrefix(raw, " ") || strings.HasPrefix(raw, "\t")) {
-			continue
-		}
-		// Non-indented line resets the Match block scope.
-		inMatchBlock = false
 
 		// sshd_config allows space or tab as the separator between keyword and value.
 		// SplitN on a single space would miss tab-separated directives.
 		idx := strings.IndexAny(line, " \t")
 		if idx <= 0 {
+			// Single-token line (e.g. bare "Match") — treat as a Match keyword.
+			if strings.EqualFold(line, "match") {
+				result["_match"] = "sshd_config contains Match blocks — some directives may be scoped to specific sessions and not apply globally"
+				inMatchBlock = true
+			}
+			// Otherwise skip malformed lines, but don't reset inMatchBlock.
 			continue
 		}
 		key := line[:idx]
@@ -128,6 +128,12 @@ func parseSshdConfig() map[string]string {
 		if strings.EqualFold(key, "Match") {
 			result["_match"] = "sshd_config contains Match blocks — some directives may be scoped to specific sessions and not apply globally"
 			inMatchBlock = true
+			continue
+		}
+		// Per sshd_config(5), a Match block extends until the next Match keyword
+		// or EOF — indentation is not part of the spec. Skip all non-Match lines
+		// inside an active Match block regardless of indentation.
+		if inMatchBlock {
 			continue
 		}
 		// First-match-wins: sshd uses the first occurrence of a directive.

@@ -196,7 +196,7 @@ func run(ctx context.Context, args []string) error {
 	var threatResult *threat.Result
 	if *doThreatIntel {
 		fmt.Fprintln(progress, "\nRunning threat intelligence scan...")
-		tr := threat.Scan()
+		tr := threat.Scan(ctx)
 		threatResult = &tr
 		printThreatSummaryTo(progress, tr)
 	}
@@ -440,9 +440,14 @@ func effectiveUser() userInfo {
 // lookupPasswd parses /etc/passwd for uid, gid, and home.  Works on Linux;
 // on macOS regular users are absent so lookupByID is the fallback.
 func lookupPasswd(username string) (userInfo, error) {
-	data, err := os.ReadFile("/etc/passwd")
+	f, err := os.Open("/etc/passwd")
 	if err != nil {
 		return userInfo{}, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 1*1024*1024))
+	if err != nil {
+		return userInfo{}, fmt.Errorf("reading /etc/passwd: %w", err)
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.SplitN(line, ":", 7)

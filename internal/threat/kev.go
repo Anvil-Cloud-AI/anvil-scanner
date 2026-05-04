@@ -53,7 +53,7 @@ func kevCacheFile() string {
 
 // fetchKEVFeed retrieves the CISA KEV JSON feed, using a 24-hour file cache.
 // Returns the parsed feed or nil with an error string on failure.
-func fetchKEVFeed() (*kevFeed, float64, string) {
+func fetchKEVFeed(ctx context.Context) (*kevFeed, float64, string) {
 	cacheFile := kevCacheFile()
 
 	// Check cache freshness.
@@ -81,7 +81,7 @@ func fetchKEVFeed() (*kevFeed, float64, string) {
 			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
 		},
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, kevFeedURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, kevFeedURL, nil)
 	if err != nil {
 		return nil, 0, fmt.Sprintf("KEV request build failed: %v", err)
 	}
@@ -128,8 +128,8 @@ func fetchKEVFeed() (*kevFeed, float64, string) {
 
 // CheckCISAKEV fetches the CISA Known Exploited Vulnerabilities feed and
 // cross-references it against installed packages from the bundled CVE database.
-func CheckCISAKEV() CISAKEVResult {
-	feed, cacheAgeHours, fetchErr := fetchKEVFeed()
+func CheckCISAKEV(ctx context.Context) CISAKEVResult {
+	feed, cacheAgeHours, fetchErr := fetchKEVFeed(ctx)
 	if feed == nil {
 		return CISAKEVResult{
 			Matched: []KEVMatch{},

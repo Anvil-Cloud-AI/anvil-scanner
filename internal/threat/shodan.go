@@ -25,7 +25,7 @@ type shodanResponse struct {
 // CheckShodan queries Shodan's free InternetDB endpoint for the given public IP.
 // It returns a skip result for private, loopback, link-local, or empty IPs.
 // All HTTP errors are captured in the Error field; the function never panics.
-func CheckShodan(publicIP string) ShodanResult {
+func CheckShodan(ctx context.Context, publicIP string) ShodanResult {
 	if publicIP == "" || publicIP == "unavailable" {
 		return ShodanResult{Skipped: true, SkipReason: "Public IP unavailable"}
 	}
@@ -41,7 +41,7 @@ func CheckShodan(publicIP string) ShodanResult {
 		return ShodanResult{Error: fmt.Sprintf("invalid public IP from ipify: %q", publicIP)}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	url := fmt.Sprintf("https://internetdb.shodan.io/%s", publicIP)

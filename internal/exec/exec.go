@@ -19,6 +19,32 @@ import (
 // that need a different ceiling should pass it explicitly via RunCtx.
 const DefaultTimeout = 30 * time.Second
 
+// maxExecOutputBytes caps stdout and stderr independently at 1 MiB each to
+// prevent runaway subprocesses from exhausting process memory.
+const maxExecOutputBytes = 1 * 1024 * 1024
+
+// limitedWriter wraps bytes.Buffer with a hard capacity cap.  Bytes beyond
+// the cap are silently discarded; the Write call always reports consuming
+// all of p so the child process does not receive a broken-pipe error.
+type limitedWriter struct {
+	buf     bytes.Buffer
+	cap     int64
+	written int64
+}
+
+func (w *limitedWriter) Write(p []byte) (int, error) {
+	remaining := w.cap - w.written
+	if remaining <= 0 {
+		return len(p), nil // discard; claim success to avoid broken-pipe
+	}
+	if int64(len(p)) > remaining {
+		p = p[:remaining]
+	}
+	n, err := w.buf.Write(p)
+	w.written += int64(n)
+	return len(p), err // always claim full consumption
+}
+
 // Result captures everything a caller could want about a subprocess
 // invocation. The shape matches (rc, stdout, stderr) from the Python
 // reference, plus a TimedOut flag so callers don't have to string-match
@@ -68,7 +94,9 @@ func Run(name string, args ...string) Result {
 func RunCtx(ctx context.Context, stdin io.Reader, name string, args ...string) Result {
 	cmd := exec.CommandContext(ctx, name, args...)
 
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr limitedWriter
+	stdout.cap = maxExecOutputBytes
+	stderr.cap = maxExecOutputBytes
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if stdin != nil {
@@ -78,8 +106,8 @@ func RunCtx(ctx context.Context, stdin io.Reader, name string, args ...string) R
 	err := cmd.Run()
 
 	res := Result{
-		Stdout: stdout.String(),
-		Stderr: stderr.String(),
+		Stdout: stdout.buf.String(),
+		Stderr: stderr.buf.String(),
 		Err:    err,
 	}
 

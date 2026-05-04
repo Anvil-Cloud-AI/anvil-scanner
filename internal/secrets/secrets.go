@@ -66,6 +66,11 @@ func EncryptSecrets(sourceEnvFile string, backend string) error {
 	if err != nil {
 		return fmt.Errorf("secrets: read source file: %w", err)
 	}
+	defer func() {
+		for i := range plain {
+			plain[i] = 0
+		}
+	}()
 
 	// Normalise and validate backend.
 	backend, err = resolveBackend(backend)
@@ -212,6 +217,11 @@ func DecryptSecrets(destEnvFile string) error {
 	if err != nil {
 		return fmt.Errorf("secrets: decrypt: %w", err)
 	}
+	defer func() {
+		for i := range plain {
+			plain[i] = 0
+		}
+	}()
 
 	if err := writeSecureFile(destEnvFile, plain); err != nil {
 		return fmt.Errorf("secrets: write plaintext: %w", err)

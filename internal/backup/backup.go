@@ -100,6 +100,14 @@ func (m *Manager) Backup(path, description string) bool {
 	}
 	dest := filepath.Join(m.SessionDir, rel)
 
+	// Containment guard: dest must resolve within SessionDir to prevent a
+	// crafted path (e.g. containing "..") from escaping the session directory.
+	sessionPrefix := filepath.Clean(m.SessionDir) + string(filepath.Separator)
+	if !strings.HasPrefix(filepath.Clean(dest)+string(filepath.Separator), sessionPrefix) {
+		fmt.Fprintf(os.Stderr, "WARNING: backup: destination %q escapes session directory\n", dest)
+		return false
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: backup: cannot create destination directory %s: %v\n", filepath.Dir(dest), err)
 		return false
@@ -602,6 +610,14 @@ func copyFile(src, dst string) error {
 	fi, err := in.Stat()
 	if err != nil {
 		return fmt.Errorf("backup: stat %s: %w", src, err)
+	}
+
+	// TOCTOU guard: if a symlink exists at dst, remove it before creating the
+	// real file so the write cannot be redirected to an unintended target.
+	if fi, lstatErr := os.Lstat(dst); lstatErr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(dst); err != nil {
+			return fmt.Errorf("backup: remove symlink at dst %s: %w", dst, err)
+		}
 	}
 
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)

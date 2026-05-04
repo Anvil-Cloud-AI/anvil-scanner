@@ -27,7 +27,7 @@ type abuseIPDBResponse struct {
 // CheckAbuseIPDB queries the AbuseIPDB v2 API for the given public IP.
 // It requires the ABUSEIPDB_KEY environment variable; if absent it returns
 // a skip result. All HTTP errors are captured in the Error field.
-func CheckAbuseIPDB(publicIP string) AbuseIPDBResult {
+func CheckAbuseIPDB(ctx context.Context, publicIP string) AbuseIPDBResult {
 	if publicIP == "" || publicIP == "unavailable" {
 		return AbuseIPDBResult{Skipped: true, SkipReason: "Public IP unavailable"}
 	}
@@ -55,7 +55,7 @@ func CheckAbuseIPDB(publicIP string) AbuseIPDBResult {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	params := url.Values{
