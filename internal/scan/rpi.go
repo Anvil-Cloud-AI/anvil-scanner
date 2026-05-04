@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -61,6 +62,10 @@ func DetectRPI() RPIInfo {
 					break
 				}
 			}
+			if err := s.Err(); err != nil {
+				// /proc/cpuinfo read error — treat as non-Pi
+				return RPIInfo{}
+			}
 		}
 	}
 
@@ -78,8 +83,13 @@ func DetectRPI() RPIInfo {
 
 	if btDir, err := os.Open("/sys/class/bluetooth"); err == nil {
 		defer btDir.Close()
-		entries, _ := btDir.Readdir(1)
-		info.HasBluetooth = len(entries) > 0
+		entries, rdErr := btDir.Readdir(1)
+		if rdErr != nil {
+			// sysfs read error (e.g. permission denied) — assume present but unreadable
+			info.HasBluetooth = true
+		} else {
+			info.HasBluetooth = len(entries) > 0
+		}
 	}
 
 	return info
@@ -147,18 +157,46 @@ func rpi001DefaultPassword(b *CheckBuilder) {
 		return
 	}
 
-	// Verify via python3 crypt — Go's stdlib has no crypt(3) binding.
+	// Verify via python3 — Go's stdlib has no crypt(3) binding.
 	// Pass the hash via stdin to avoid embedding /etc/shadow content in a
 	// -c argument string where %q Go-escapes rather than Python-escapes it.
+	// The crypt module was removed in Python 3.13; fall back to passlib then
+	// hashlib-based SHA-512.
+	const pyScript = `
+import sys
+h = sys.stdin.read().strip()
+pw = 'raspberry'
+try:
+    import crypt
+    print(crypt.crypt(pw, h))
+    sys.exit(0)
+except ImportError:
+    pass
+try:
+    from passlib.hash import sha512_crypt
+    print(sha512_crypt.hash(pw, rounds=5000, salt=h[3:19]) if h.startswith('$6$') else 'UNSUPPORTED')
+    sys.exit(0)
+except ImportError:
+    pass
+print('UNAVAILABLE')
+`
 	ctx, cancel := context.WithTimeout(context.Background(), exec.DefaultTimeout)
 	defer cancel()
-	res := exec.RunCtx(ctx, strings.NewReader(piHash), "python3", "-c",
-		"import sys, crypt; print(crypt.crypt('raspberry', sys.stdin.read().strip()))")
+	res := exec.RunCtx(ctx, strings.NewReader(piHash), "python3", "-c", pyScript)
+	out := strings.TrimSpace(res.Stdout)
 	switch {
-	case res.Success() && strings.TrimSpace(res.Stdout) == piHash:
+	case res.Success() && out == piHash:
 		b.Fail("RPI-001", "Default 'pi' user password",
 			"CRITICAL: 'pi' user still has the default password 'raspberry'. "+
 				"Change immediately: sudo passwd pi", SeverityCritical)
+	case res.Success() && out == "UNAVAILABLE":
+		b.Warn("RPI-001", "Default 'pi' user password",
+			"python3 crypt library unavailable (Python 3.13+ removed it); cannot verify default password — check manually: sudo passwd pi",
+			SeverityCritical)
+	case res.Success() && out == "UNSUPPORTED":
+		b.Warn("RPI-001", "Default 'pi' user password",
+			"Hash format not supported by available python3 libraries; cannot verify default password — check manually: sudo passwd pi",
+			SeverityCritical)
 	case res.Success():
 		b.Pass("RPI-001", "Default 'pi' user password",
 			"'pi' user password has been changed from default", SeverityCritical)
@@ -399,7 +437,11 @@ func rpi009GPUMemory(b *CheckBuilder) {
 	for _, line := range strings.Split(string(data), "\n") {
 		stripped := strings.TrimSpace(line)
 		if strings.HasPrefix(stripped, "gpu_mem=") && !strings.HasPrefix(stripped, "#") {
-			if v, err := strconv.Atoi(strings.TrimSpace(strings.SplitN(stripped, "=", 2)[1])); err == nil {
+			rawVal := strings.TrimSpace(strings.SplitN(stripped, "=", 2)[1])
+			if i := strings.IndexByte(rawVal, '#'); i >= 0 {
+				rawVal = strings.TrimSpace(rawVal[:i])
+			}
+			if v, err := strconv.Atoi(rawVal); err == nil {
 				gpuMem = &v
 			}
 			break
@@ -525,6 +567,6 @@ func rpi012Throttle(b *CheckBuilder) {
 
 // commandExists returns true when the given command is on PATH.
 func commandExists(name string) bool {
-	res := exec.Run("which", name)
-	return res.Success()
+	_, err := osexec.LookPath(name)
+	return err == nil
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -57,8 +58,12 @@ func CheckAbuseIPDB(publicIP string) AbuseIPDBResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("https://api.abuseipdb.com/api/v2/check?ipAddress=%s&maxAgeInDays=90", publicIP)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	params := url.Values{
+		"ipAddress":    {publicIP},
+		"maxAgeInDays": {"90"},
+	}
+	apiURL := "https://api.abuseipdb.com/api/v2/check?" + params.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return AbuseIPDBResult{Error: fmt.Sprintf("AbuseIPDB request build failed: %v", err)}
 	}
@@ -66,7 +71,14 @@ func CheckAbuseIPDB(publicIP string) AbuseIPDBResult {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "anvil-scanner/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSHandshakeTimeout: 5 * time.Second,
+			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return AbuseIPDBResult{Error: fmt.Sprintf("AbuseIPDB query failed: %v", err)}
 	}

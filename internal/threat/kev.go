@@ -60,7 +60,7 @@ func fetchKEVFeed() (*kevFeed, float64, string) {
 	if fi, err := os.Stat(cacheFile); err == nil {
 		cacheAgeHours = time.Since(fi.ModTime()).Hours()
 		if cacheAgeHours < kevMaxAgeHours {
-			data, err := os.ReadFile(cacheFile)
+			data, err := readFileCapped(cacheFile, int64(kevMaxSizeBytes))
 			if err == nil {
 				var feed kevFeed
 				if json.Unmarshal(data, &feed) == nil {

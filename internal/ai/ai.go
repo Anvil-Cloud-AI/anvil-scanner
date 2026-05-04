@@ -215,14 +215,17 @@ func Analyze(ctx context.Context, prompt string, skip bool, provider Provider) A
 }
 
 // BuildPrompt constructs the AI analysis prompt from a simplified scan summary.
-func BuildPrompt(platform string, openPorts []string, pendingUpdates int, priorityCount int) string {
+func BuildPrompt(platform string, openPorts []string, pendingUpdates int, priorityCount int) (string, error) {
 	summary := map[string]any{
 		"platform":             platform,
 		"open_ports":           openPorts,
 		"pending_update_count": pendingUpdates,
 		"priority_findings":    priorityCount,
 	}
-	summaryJSON, _ := json.MarshalIndent(summary, "", "  ")
+	summaryJSON, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("buildPrompt: marshal: %w", err)
+	}
 	return fmt.Sprintf(`You are a senior %s security engineer reviewing an automated host hardening scan.
 
 SCAN DATA:
@@ -240,7 +243,7 @@ Rules:
 - risks and recommendations may be empty arrays [] if there are genuinely none.
 - overview must always be present and non-empty.
 - Do not suggest specific shell commands to run.
-`, platform, string(summaryJSON))
+`, platform, string(summaryJSON)), nil
 }
 
 // validateExternalAPIURL checks that rawURL is HTTPS and that its hostname
@@ -377,7 +380,8 @@ func callClaude(ctx context.Context, prompt string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", key)
 	req.Header.Set("anthropic-version", "2023-06-01")
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Transport: ssrfSafeTransport}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("claude request failed: %w", err)
 	}
@@ -387,11 +391,16 @@ func callClaude(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		snippet := string(respBody)
-		if len(snippet) > maxErrorSnippet {
-			snippet = snippet[:maxErrorSnippet] + "..."
+		var apiErr struct {
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
 		}
-		return "", fmt.Errorf("claude API error %d: %s", resp.StatusCode, snippet)
+		if jsonErr := json.Unmarshal(respBody, &apiErr); jsonErr == nil && apiErr.Error.Type != "" {
+			return "", fmt.Errorf("claude API error %d: %s", resp.StatusCode, apiErr.Error.Type)
+		}
+		return "", fmt.Errorf("claude API error %d", resp.StatusCode)
 	}
 	var result struct {
 		Content []struct {
@@ -445,11 +454,16 @@ func callOpenAI(ctx context.Context, prompt, model, key, baseURL string) (string
 		return "", fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		snippet := string(respBody)
-		if len(snippet) > maxErrorSnippet {
-			snippet = snippet[:maxErrorSnippet] + "..."
+		var apiErr struct {
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
 		}
-		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, snippet)
+		if jsonErr := json.Unmarshal(respBody, &apiErr); jsonErr == nil && apiErr.Error.Type != "" {
+			return "", fmt.Errorf("API error %d: %s", resp.StatusCode, apiErr.Error.Type)
+		}
+		return "", fmt.Errorf("API error %d", resp.StatusCode)
 	}
 	var result struct {
 		Choices []struct {

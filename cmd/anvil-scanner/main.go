@@ -207,8 +207,13 @@ func run(args []string) error {
 		}
 	} else {
 		fmt.Fprintf(progress, "\nRunning AI analysis via %s...\n", aiProviderName)
-		prompt := ai.BuildPrompt(scan.Platform(), openPorts, pendingUpdates, len(report.PriorityFindings(result.Checks)))
-		analysis = ai.Analyze(context.Background(), prompt, false, aiProvider)
+		prompt, promptErr := ai.BuildPrompt(scan.Platform(), openPorts, pendingUpdates, len(report.PriorityFindings(result.Checks)))
+		if promptErr != nil {
+			fmt.Fprintf(os.Stderr, "AI prompt error: %s\n", promptErr)
+			analysis = ai.Analysis{Error: promptErr.Error()}
+		} else {
+			analysis = ai.Analyze(context.Background(), prompt, false, aiProvider)
+		}
 		if analysis.Error != "" {
 			fmt.Fprintf(os.Stderr, "AI analysis error: %s\n", analysis.Error)
 		} else if analysis.RiskScore != nil {

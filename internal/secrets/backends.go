@@ -3,7 +3,6 @@
 package secrets
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -23,10 +22,11 @@ import (
 // ── OS keyring ────────────────────────────────────────────────────────────────
 
 const (
-	keyringService  = "anvil-scanner"
-	keyringAccount  = "anvil_scanner_master_key"
-	keyringDummyKey = "ANVILPROBE"
-	keyringTimeout  = 10 * time.Second
+	keyringService      = "anvil-scanner"
+	keyringAccount      = "anvil_scanner_master_key"
+	keyringProbeAccount = "anvil_scanner_probe" // dedicated probe account; never collides with keyringAccount
+	keyringDummyKey     = "ANVILPROBE"
+	keyringTimeout      = 10 * time.Second
 )
 
 var validKeyNameRE = regexp.MustCompile(`^[A-Z0-9_]+$`)
@@ -44,7 +44,7 @@ func storeKeyringMasterKey(key []byte) error {
 			"-w", encoded,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: keyring store failed (exit %d): %s", r.ExitCode, r.Stderr)
+			return fmt.Errorf("secrets: keyring store failed (exit %d): see system keyring logs", r.ExitCode)
 		}
 		return nil
 	default: // linux
@@ -58,7 +58,7 @@ func storeKeyringMasterKey(key []byte) error {
 			"username", keyringAccount,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: keyring store failed (exit %d): %s", r.ExitCode, r.Stderr)
+			return fmt.Errorf("secrets: keyring store failed (exit %d): see system keyring logs", r.ExitCode)
 		}
 		return nil
 	}
@@ -76,7 +76,7 @@ func loadKeyringMasterKey() ([]byte, error) {
 			"-w",
 		)
 		if !r.Success() {
-			return nil, fmt.Errorf("secrets: keyring load failed (exit %d): %s", r.ExitCode, r.Stderr)
+			return nil, fmt.Errorf("secrets: keyring load failed (exit %d): see system keyring logs", r.ExitCode)
 		}
 		raw = strings.TrimSpace(r.Stdout)
 	default: // linux
@@ -85,7 +85,7 @@ func loadKeyringMasterKey() ([]byte, error) {
 			"username", keyringAccount,
 		)
 		if !r.Success() {
-			return nil, fmt.Errorf("secrets: keyring load failed (exit %d): %s", r.ExitCode, r.Stderr)
+			return nil, fmt.Errorf("secrets: keyring load failed (exit %d): see system keyring logs", r.ExitCode)
 		}
 		raw = strings.TrimSpace(r.Stdout)
 	}
@@ -124,24 +124,96 @@ func deleteKeyringMasterKey() error {
 	}
 }
 
+// storeKeyringProbe writes the probe sentinel to the dedicated probe account.
+// It never touches keyringAccount (the production master key entry).
+func storeKeyringProbe() error {
+	switch runtime.GOOS {
+	case "darwin":
+		r := iexec.Run("security", "add-generic-password",
+			"-U",
+			"-s", keyringService,
+			"-a", keyringProbeAccount,
+			"-w", keyringDummyKey,
+		)
+		if !r.Success() {
+			return fmt.Errorf("secrets: keyring probe store failed (exit %d): see system keyring logs", r.ExitCode)
+		}
+		return nil
+	default: // linux
+		ctx, cancel := context.WithTimeout(context.Background(), keyringTimeout)
+		defer cancel()
+		r := iexec.RunCtx(ctx, strings.NewReader(keyringDummyKey+"\n"),
+			"secret-tool", "store",
+			"--label="+keyringService,
+			"service", keyringService,
+			"username", keyringProbeAccount,
+		)
+		if !r.Success() {
+			return fmt.Errorf("secrets: keyring probe store failed (exit %d): see system keyring logs", r.ExitCode)
+		}
+		return nil
+	}
+}
+
+// loadKeyringProbe reads the probe sentinel from the dedicated probe account.
+func loadKeyringProbe() (string, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		r := iexec.Run("security", "find-generic-password",
+			"-s", keyringService,
+			"-a", keyringProbeAccount,
+			"-w",
+		)
+		if !r.Success() {
+			return "", fmt.Errorf("secrets: keyring probe load failed (exit %d): see system keyring logs", r.ExitCode)
+		}
+		return strings.TrimSpace(r.Stdout), nil
+	default: // linux
+		r := iexec.Run("secret-tool", "lookup",
+			"service", keyringService,
+			"username", keyringProbeAccount,
+		)
+		if !r.Success() {
+			return "", fmt.Errorf("secrets: keyring probe load failed (exit %d): see system keyring logs", r.ExitCode)
+		}
+		return strings.TrimSpace(r.Stdout), nil
+	}
+}
+
+// deleteKeyringProbe removes the probe sentinel from the dedicated probe account.
+func deleteKeyringProbe() {
+	switch runtime.GOOS {
+	case "darwin":
+		iexec.Run("security", "delete-generic-password",
+			"-s", keyringService,
+			"-a", keyringProbeAccount,
+		)
+	default: // linux
+		iexec.Run("secret-tool", "clear",
+			"service", keyringService,
+			"username", keyringProbeAccount,
+		)
+	}
+}
+
 // hasKeyring probes the OS credential store by performing a dummy
-// write → read → delete cycle.  Returns true only when all three
-// operations succeed and the round-trip value is intact.
+// write → read → delete cycle using a dedicated probe account that
+// never collides with the production master key account (keyringAccount).
+// Returns true only when all three operations succeed and the round-trip
+// value is intact.
 //
 // This is the probe described in ADR-0002 §auto-selection.
 func hasKeyring() bool {
-	dummyKey := []byte(keyringDummyKey)
-
-	if err := storeKeyringMasterKey(dummyKey); err != nil {
+	if err := storeKeyringProbe(); err != nil {
 		return false
 	}
-	got, err := loadKeyringMasterKey()
+	got, err := loadKeyringProbe()
+	// Always clean up the probe entry, even on load failure.
+	deleteKeyringProbe()
 	if err != nil {
-		_ = deleteKeyringMasterKey()
 		return false
 	}
-	_ = deleteKeyringMasterKey()
-	return bytes.Equal(got, dummyKey)
+	return got == keyringDummyKey
 }
 
 // ── Passphrase backend ────────────────────────────────────────────────────────
@@ -238,7 +310,7 @@ func storeKeyringSecret(name, value string) error {
 			"-w", value,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: store keyring secret %q (exit %d): %s", name, r.ExitCode, r.Stderr)
+			return fmt.Errorf("secrets: store keyring secret %q (exit %d): see system keyring logs", name, r.ExitCode)
 		}
 		return nil
 	default: // linux
@@ -251,7 +323,7 @@ func storeKeyringSecret(name, value string) error {
 			"username", account,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: store keyring secret %q (exit %d): %s", name, r.ExitCode, r.Stderr)
+			return fmt.Errorf("secrets: store keyring secret %q (exit %d): see system keyring logs", name, r.ExitCode)
 		}
 		return nil
 	}

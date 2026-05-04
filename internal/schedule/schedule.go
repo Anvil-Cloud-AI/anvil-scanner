@@ -231,11 +231,15 @@ func filterCron(lines []string) []string {
 }
 
 func writeCrontab(content string) error {
-	tmpDir, err := os.UserHomeDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		tmpDir = os.TempDir()
+		return fmt.Errorf("writeCrontab: cannot determine home dir: %w", err)
 	}
-	tmp, err := os.CreateTemp(tmpDir, "anvil-crontab-*")
+	anvilDir := filepath.Join(home, ".anvil-scanner")
+	if err := os.MkdirAll(anvilDir, 0o700); err != nil {
+		return fmt.Errorf("writeCrontab: creating dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(anvilDir, "anvil-crontab-*")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}

@@ -471,7 +471,11 @@ func checkSSHKeys(result *LocalIOCResult) {
 		for _, line := range strings.Split(string(passwdData), "\n") {
 			parts := strings.Split(line, ":")
 			if len(parts) >= 6 {
-				ak := filepath.Join(parts[5], ".ssh", "authorized_keys")
+				home := parts[5]
+				if !filepath.IsAbs(home) {
+					continue
+				}
+				ak := filepath.Join(home, ".ssh", "authorized_keys")
 				addPath(ak)
 			}
 		}
@@ -624,9 +628,12 @@ func checkAuthLog(result *LocalIOCResult) {
 	defer f.Close()
 
 	if fi, statErr := f.Stat(); statErr == nil && fi.Size() > maxAuthLogBytes {
-		_, _ = f.Seek(-maxAuthLogBytes, io.SeekEnd)
+		if _, err := f.Seek(-maxAuthLogBytes, io.SeekEnd); err != nil {
+			// non-seekable; read from current position (start), still cap
+			_ = err
+		}
 	}
-	data, err := io.ReadAll(f)
+	data, err := io.ReadAll(io.LimitReader(f, maxAuthLogBytes))
 	if err != nil {
 		result.AuthAnomalies = append(result.AuthAnomalies,
 			fmt.Sprintf("Could not read %s (permission denied or not found)", authLog))
@@ -672,7 +679,10 @@ func checkAuthLog(result *LocalIOCResult) {
 			// Only trust SUDO_USER when running as root (matches Python: os.geteuid()==0).
 			if os.Getuid() == 0 {
 				if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-					knownSafe[sudoUser] = true
+					matched, _ := regexp.MatchString(`^[a-zA-Z0-9_.\-]{1,64}$`, sudoUser)
+					if matched {
+						knownSafe[sudoUser] = true
+					}
 				}
 			}
 			if currentUser != "" {

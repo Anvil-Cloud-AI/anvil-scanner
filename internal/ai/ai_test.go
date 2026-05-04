@@ -189,7 +189,10 @@ func TestCallOllama_Non200ReturnsError(t *testing.T) {
 
 // TestBuildPrompt_ContainsKeyFields verifies the prompt includes scan data.
 func TestBuildPrompt_ContainsKeyFields(t *testing.T) {
-	prompt := BuildPrompt("Darwin", []string{"22", "443"}, 5, 3)
+	prompt, err := BuildPrompt("Darwin", []string{"22", "443"}, 5, 3)
+	if err != nil {
+		t.Fatalf("BuildPrompt returned unexpected error: %v", err)
+	}
 	for _, want := range []string{"Darwin", "22", "443", "pending_update_count", "priority_findings"} {
 		if len(prompt) == 0 {
 			t.Fatal("empty prompt")

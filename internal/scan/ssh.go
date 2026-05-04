@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -259,12 +260,14 @@ func RunSSHChecks(b *CheckBuilder, platform string, remoteLoginEnabled *bool) {
 		SeverityMedium,
 	)
 
-	// SSH-008 — LoginGraceTime ≤ 60s
+	// SSH-008 — LoginGraceTime 1–60s (0 means unlimited, which is insecure)
 	checkSSHInt(b, cfg, "SSH-008", "LoginGraceTime ≤ 60s", "LoginGraceTime",
 		true,
-		func(v int) bool { return v <= 60 },
+		func(v int) bool { return v > 0 && v <= 60 },
 		func(v int) string { return fmt.Sprintf("LoginGraceTime = %ds", v) },
-		func(v int) string { return fmt.Sprintf("LoginGraceTime = %ds (should be ≤ 60)", v) },
+		func(v int) string {
+			return fmt.Sprintf("LoginGraceTime = %ds (should be between 1 and 60 seconds; 0 means unlimited)", v)
+		},
 		"LoginGraceTime not set (default is 120, should be ≤ 60)",
 		SeverityMedium,
 	)
@@ -437,8 +440,15 @@ func checkSSHDirPerms() ([]string, error) {
 			continue // malformed passwd entry
 		}
 		home := parts[5]
+		if !filepath.IsAbs(home) {
+			continue
+		}
 		shell := parts[6]
-		if (uid < 500 && uid != 0) || strings.Contains(shell, "nologin") || strings.Contains(shell, "/false") {
+		minUID := 500
+		if runtime.GOOS == "linux" {
+			minUID = 1000
+		}
+		if (uid < minUID && uid != 0) || strings.Contains(shell, "nologin") || strings.Contains(shell, "/false") {
 			continue
 		}
 		if _, err := os.Stat(home); err != nil {

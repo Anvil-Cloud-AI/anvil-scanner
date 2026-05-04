@@ -71,7 +71,7 @@ func NewManager() (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	ts := time.Now().Format("2006-01-02_150405")
+	ts := time.Now().Format("2006-01-02_150405.000")
 	return &Manager{
 		BackupRoot: root,
 		SessionDir: filepath.Join(root, ts),
@@ -89,6 +89,7 @@ func (m *Manager) Backup(path, description string) bool {
 
 	// Create session dir with restricted permissions.
 	if err := os.MkdirAll(m.SessionDir, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: backup: cannot create session directory %s: %v\n", m.SessionDir, err)
 		return false
 	}
 
@@ -100,10 +101,12 @@ func (m *Manager) Backup(path, description string) bool {
 	dest := filepath.Join(m.SessionDir, rel)
 
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: backup: cannot create destination directory %s: %v\n", filepath.Dir(dest), err)
 		return false
 	}
 
 	if err := copyFile(path, dest); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: backup: failed to copy %s: %v\n", path, err)
 		return false
 	}
 
@@ -238,9 +241,50 @@ func RevertSession(sessionDir string) (restored, failed int, err error) {
 		resolvedSession = absSession
 	}
 
+	allowedRestorePrefixes := []string{
+		"/etc/",
+		"/Library/",
+		"/private/etc/",
+		"/private/Library/",
+		"/private/var/",
+		"/home/",
+		"/Users/",
+		"/root/",
+		"/boot/",
+		"/boot/firmware/",
+	}
+
 	for _, entry := range data.Backups {
 		src := entry.Backup
-		dst := entry.Original
+		dst := filepath.Clean(entry.Original)
+
+		// Destination allowlist guard: dst must be an absolute path within a
+		// known system directory that anvil-scanner could legitimately have
+		// backed up. This prevents a crafted manifest from writing to arbitrary
+		// paths such as /etc/sudoers or /tmp/evil.
+		if !filepath.IsAbs(dst) {
+			fmt.Fprintf(os.Stderr, "WARNING: backup: skipping unsafe restore destination: %s\n", dst)
+			failed++
+			continue
+		}
+		// Resolve symlinks so that paths like /var (-> /private/var on macOS)
+		// match the allowlist entry for /private/var/.
+		resolvedDst := dst
+		if rd, err2 := filepath.EvalSymlinks(filepath.Dir(dst)); err2 == nil {
+			resolvedDst = filepath.Join(rd, filepath.Base(dst))
+		}
+		dstAllowed := false
+		for _, prefix := range allowedRestorePrefixes {
+			if strings.HasPrefix(resolvedDst, prefix) {
+				dstAllowed = true
+				break
+			}
+		}
+		if !dstAllowed {
+			fmt.Fprintf(os.Stderr, "WARNING: backup: skipping unsafe restore destination: %s\n", dst)
+			failed++
+			continue
+		}
 
 		// Path-traversal guard: src must resolve within sessionDir.
 		absSrc, err := filepath.Abs(src)
@@ -570,10 +614,13 @@ func copyFile(src, dst string) error {
 		_ = os.Remove(dst)
 		return fmt.Errorf("backup: copy %s → %s: %w", src, dst, err)
 	}
-	// Preserve original permissions (best-effort).
-	_ = os.Chmod(dst, fi.Mode())
 	if err := out.Close(); err != nil {
+		_ = os.Remove(dst)
 		return fmt.Errorf("backup: close %s: %w", dst, err)
+	}
+	// Preserve original permissions (best-effort, non-fatal).
+	if err := os.Chmod(dst, fi.Mode()); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: backup: chmod %s: %v\n", dst, err)
 	}
 	return nil
 }

@@ -285,6 +285,9 @@ func LoadSecrets() map[string]string {
 									}
 								}
 							}
+							for i := range plain {
+								plain[i] = 0
+							}
 						}
 					}
 				}
@@ -429,6 +432,11 @@ func RotateKeyBackend(target string) error {
 		return fmt.Errorf("secrets: decrypt current container: %w", err)
 	}
 
+	// Ensure the secrets directory exists before creating a temp file in it.
+	if err := os.MkdirAll(secretsDir(), 0o700); err != nil {
+		return fmt.Errorf("secrets: create secrets dir: %w", err)
+	}
+
 	// Write plaintext to a temp file and shred it in a defer.
 	tmp, err := os.CreateTemp(secretsDir(), ".rotate-*.env")
 	if err != nil {
@@ -500,6 +508,9 @@ func StoreSecretsKeyring() error {
 							masterKey[i] = 0
 						}
 						secretMap = parseEnvFile(string(plain))
+						for i := range plain {
+							plain[i] = 0
+						}
 					}
 				}
 			}
