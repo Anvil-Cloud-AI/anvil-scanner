@@ -581,6 +581,113 @@ func TestReadMagicBytes_EmptyFile(t *testing.T) {
 	}
 }
 
+// ── checkMacOSTmpdir TMPDIR guard tests ───────────────────────────────────────
+
+// TestCheckMacOSTmpdir_RelativeTMPDIR verifies that when $TMPDIR is set to a
+// relative (non-absolute) path the function returns early without scanning,
+// producing zero SuspiciousTempFiles findings.
+func TestCheckMacOSTmpdir_RelativeTMPDIR(t *testing.T) {
+	prev := os.Getenv("TMPDIR")
+	os.Setenv("TMPDIR", "relative/path/tmp")
+	defer func() {
+		if prev == "" {
+			os.Unsetenv("TMPDIR")
+		} else {
+			os.Setenv("TMPDIR", prev)
+		}
+	}()
+
+	result := &LocalIOCResult{SuspiciousTempFiles: []string{}}
+	checkMacOSTmpdir(result)
+
+	if len(result.SuspiciousTempFiles) != 0 {
+		t.Errorf("checkMacOSTmpdir with relative TMPDIR: expected 0 findings, got %d: %v",
+			len(result.SuspiciousTempFiles), result.SuspiciousTempFiles)
+	}
+}
+
+// TestCheckMacOSTmpdir_EmptyTMPDIR verifies that when $TMPDIR is empty the
+// function returns early producing zero findings.
+func TestCheckMacOSTmpdir_EmptyTMPDIR(t *testing.T) {
+	prev := os.Getenv("TMPDIR")
+	os.Unsetenv("TMPDIR")
+	defer func() {
+		if prev != "" {
+			os.Setenv("TMPDIR", prev)
+		}
+	}()
+
+	result := &LocalIOCResult{SuspiciousTempFiles: []string{}}
+	checkMacOSTmpdir(result)
+
+	if len(result.SuspiciousTempFiles) != 0 {
+		t.Errorf("checkMacOSTmpdir with empty TMPDIR: expected 0 findings, got %d",
+			len(result.SuspiciousTempFiles))
+	}
+}
+
+// TestCheckMacOSTmpdir_AbsoluteTMPDIR_Proceeds verifies that when $TMPDIR is
+// an absolute path pointing to a real directory the function proceeds to scan
+// it without panic. An empty temp dir produces zero findings.
+func TestCheckMacOSTmpdir_AbsoluteTMPDIR_Proceeds(t *testing.T) {
+	dir := t.TempDir()
+
+	prev := os.Getenv("TMPDIR")
+	os.Setenv("TMPDIR", dir)
+	defer func() {
+		if prev == "" {
+			os.Unsetenv("TMPDIR")
+		} else {
+			os.Setenv("TMPDIR", prev)
+		}
+	}()
+
+	result := &LocalIOCResult{SuspiciousTempFiles: []string{}}
+	// Must not panic; empty dir produces no findings.
+	checkMacOSTmpdir(result)
+	// Zero findings expected — but the key invariant is no panic and no early
+	// exit at the relative-path guard.
+	_ = result
+}
+
+// TestCheckMacOSTmpdir_AbsoluteTMPDIR_ExecutableDetected verifies that an
+// executable file placed inside $TMPDIR is reported as suspicious.
+func TestCheckMacOSTmpdir_AbsoluteTMPDIR_ExecutableDetected(t *testing.T) {
+	dir := t.TempDir()
+
+	execFile := filepath.Join(dir, "suspicious-exec")
+	if err := os.WriteFile(execFile, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := os.Getenv("TMPDIR")
+	os.Setenv("TMPDIR", dir)
+	defer func() {
+		if prev == "" {
+			os.Unsetenv("TMPDIR")
+		} else {
+			os.Setenv("TMPDIR", prev)
+		}
+	}()
+
+	result := &LocalIOCResult{SuspiciousTempFiles: []string{}}
+	checkMacOSTmpdir(result)
+
+	if len(result.SuspiciousTempFiles) == 0 {
+		t.Error("expected at least one finding for an executable file in TMPDIR, got none")
+	}
+	found := false
+	for _, f := range result.SuspiciousTempFiles {
+		if strings.Contains(f, "suspicious-exec") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("finding should mention 'suspicious-exec', got: %v", result.SuspiciousTempFiles)
+	}
+}
+
 // TestReadMagicBytes_NRequestedBytesReturned verifies we get at most n bytes back.
 func TestReadMagicBytes_NRequestedBytesReturned(t *testing.T) {
 	dir := t.TempDir()

@@ -186,7 +186,12 @@ func EncryptSecrets(sourceEnvFile string, backend string) error {
 // the master key from the appropriate backend, and writes the plaintext to
 // destEnvFile with 0600 permissions.
 func DecryptSecrets(destEnvFile string) error {
-	blob, err := os.ReadFile(encryptedSecrets())
+	f, err := os.Open(encryptedSecrets())
+	if err != nil {
+		return fmt.Errorf("secrets: read container: %w", err)
+	}
+	defer f.Close()
+	blob, err := io.ReadAll(io.LimitReader(f, 64*1024))
 	if err != nil {
 		return fmt.Errorf("secrets: read container: %w", err)
 	}
@@ -254,10 +259,18 @@ func LoadSecrets() map[string]string {
 
 	// 2. Encrypted container.
 	if _, err := os.Stat(encryptedSecrets()); err == nil {
-		blob, err := os.ReadFile(encryptedSecrets())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARNING: could not read %s: %v\n", encryptedSecrets(), err)
+		var blob []byte
+		if cf, cerr := os.Open(encryptedSecrets()); cerr != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: could not read %s: %v\n", encryptedSecrets(), cerr)
 		} else {
+			blob, cerr = io.ReadAll(io.LimitReader(cf, 64*1024))
+			cf.Close()
+			if cerr != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: could not read %s: %v\n", encryptedSecrets(), cerr)
+				blob = nil
+			}
+		}
+		if blob != nil {
 			hdr, ciphertext, legacy, unpackErr := unpackContainer(blob)
 			if unpackErr != nil {
 				fmt.Fprintf(os.Stderr, "WARNING: malformed secrets container: %v\n", unpackErr)
@@ -413,7 +426,12 @@ func RotateKeyBackend(target string) error {
 	}
 
 	// Decrypt current container into memory.
-	blob, err := os.ReadFile(encryptedSecrets())
+	rcf, err := os.Open(encryptedSecrets())
+	if err != nil {
+		return fmt.Errorf("secrets: read container: %w", err)
+	}
+	blob, err := io.ReadAll(io.LimitReader(rcf, 64*1024))
+	rcf.Close()
 	if err != nil {
 		return fmt.Errorf("secrets: read container: %w", err)
 	}
@@ -508,8 +526,13 @@ func StoreSecretsKeyring() error {
 	// Collect secrets from encrypted container first.
 	secretMap := make(map[string]string)
 	if _, err := os.Stat(encryptedSecrets()); err == nil {
-		blob, err := os.ReadFile(encryptedSecrets())
-		if err == nil {
+		scf, serr := os.Open(encryptedSecrets())
+		var blob []byte
+		if serr == nil {
+			blob, serr = io.ReadAll(io.LimitReader(scf, 64*1024))
+			scf.Close()
+		}
+		if serr == nil {
 			hdr, ciphertext, legacy, unpackErr := unpackContainer(blob)
 			if unpackErr == nil && !legacy {
 				if masterKey, keyErr := loadMasterKeyForHeader(hdr); keyErr == nil {
@@ -612,12 +635,25 @@ func shredFile(path string) error {
 		return fmt.Errorf("secrets: shred stat %s: %w", path, err)
 	}
 
+	const maxShredChunk = int64(1 * 1024 * 1024) // 1 MiB
 	size := info.Size()
 	if size > 0 {
-		zeros := make([]byte, size)
-		if _, err := f.WriteAt(zeros, 0); err != nil {
-			_ = f.Close()
-			return fmt.Errorf("secrets: shred write %s: %w", path, err)
+		chunkSize := size
+		if chunkSize > maxShredChunk {
+			chunkSize = maxShredChunk
+		}
+		zeros := make([]byte, chunkSize)
+		written := int64(0)
+		for written < size {
+			toWrite := chunkSize
+			if toWrite > size-written {
+				toWrite = size - written
+			}
+			if _, err := f.WriteAt(zeros[:toWrite], written); err != nil {
+				_ = f.Close()
+				return fmt.Errorf("secrets: shred write %s: %w", path, err)
+			}
+			written += toWrite
 		}
 		if err := f.Sync(); err != nil {
 			_ = f.Close()

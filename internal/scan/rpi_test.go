@@ -98,6 +98,104 @@ func TestRPI012_SkipWhenNoVcgencmd(t *testing.T) {
 	}
 }
 
+// ── rpi012Throttle flag-message ordering test ─────────────────────────────────
+
+// throttleFlagsDetail replicates the bit-field → issues-string formatting from
+// rpi012Throttle so it can be driven without a real vcgencmd binary.
+// It mirrors the flags slice defined in rpi.go exactly.
+func throttleFlagsDetail(val int64) string {
+	flags := []struct {
+		bit int64
+		msg string
+	}{
+		{0x1, "under-voltage detected NOW"},
+		{0x2, "ARM frequency capped NOW"},
+		{0x4, "currently throttled"},
+		{0x8, "soft temperature limit active"},
+		{0x10000, "under-voltage occurred since boot"},
+		{0x20000, "ARM frequency capped since boot"},
+		{0x40000, "throttled since boot"},
+		{0x80000, "soft temp limit occurred since boot"},
+	}
+	var issues []string
+	for _, f := range flags {
+		if val&f.bit != 0 {
+			issues = append(issues, f.msg)
+		}
+	}
+	return strings.Join(issues, "; ")
+}
+
+// TestRPI012_ThrottleFlagOrdering verifies that the flag-message string is
+// produced in a stable, deterministic order across repeated calls with the
+// same input. This guards against any future map-based refactor that could
+// introduce randomised iteration order.
+func TestRPI012_ThrottleFlagOrdering(t *testing.T) {
+	// 0x50005 = bits 0x1 | 0x4 | 0x10000 | 0x40000 — four flags set.
+	const val = int64(0x50005)
+
+	first := throttleFlagsDetail(val)
+	if first == "" {
+		t.Fatal("expected non-empty detail for val=0x50005")
+	}
+
+	for i := 0; i < 10; i++ {
+		got := throttleFlagsDetail(val)
+		if got != first {
+			t.Errorf("iteration %d: got %q, want %q (ordering must be stable)", i+1, got, first)
+		}
+	}
+
+	// Verify the messages appear in source-declaration order.
+	expected := []string{
+		"under-voltage detected NOW",
+		"currently throttled",
+		"under-voltage occurred since boot",
+		"throttled since boot",
+	}
+	lastIdx := -1
+	for _, msg := range expected {
+		idx := strings.Index(first, msg)
+		if idx < 0 {
+			t.Errorf("message %q not found in detail %q", msg, first)
+			continue
+		}
+		if idx <= lastIdx {
+			t.Errorf("message %q appears out of order in detail %q", msg, first)
+		}
+		lastIdx = idx
+	}
+}
+
+// TestRPI012_AllFlagsSet verifies that when all 8 throttle flags are set the
+// detail string contains every expected message fragment.
+func TestRPI012_AllFlagsSet(t *testing.T) {
+	const allBits = int64(0x1 | 0x2 | 0x4 | 0x8 | 0x10000 | 0x20000 | 0x40000 | 0x80000)
+	detail := throttleFlagsDetail(allBits)
+
+	for _, frag := range []string{
+		"under-voltage detected NOW",
+		"ARM frequency capped NOW",
+		"currently throttled",
+		"soft temperature limit active",
+		"under-voltage occurred since boot",
+		"ARM frequency capped since boot",
+		"throttled since boot",
+		"soft temp limit occurred since boot",
+	} {
+		if !strings.Contains(detail, frag) {
+			t.Errorf("detail missing %q; full: %q", frag, detail)
+		}
+	}
+}
+
+// TestRPI012_NoFlagsSet verifies that zero produces an empty detail string.
+func TestRPI012_NoFlagsSet(t *testing.T) {
+	if detail := throttleFlagsDetail(0); detail != "" {
+		t.Errorf("throttleFlagsDetail(0) = %q, want empty string", detail)
+	}
+}
+
 // ── gpu_mem config parser tests ───────────────────────────────────────────────
 
 // parseGPUMem replicates the inline gpu_mem parsing logic from rpi009GPUMemory

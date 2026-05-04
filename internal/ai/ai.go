@@ -186,10 +186,16 @@ func OllamaReachable() bool {
 	if err != nil {
 		return false
 	}
-	resp, err := http.DefaultClient.Do(req)
+	probeClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
+		},
+	}
+	resp, err := probeClient.Do(req)
 	if err != nil {
 		return false
 	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
 	resp.Body.Close()
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
@@ -333,7 +339,14 @@ func callOllama(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("create ollama request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	// Use a plain transport: validateOllamaURL already enforces localhost-only,
+	// so ssrfSafeTransport's private-IP guard is not needed (and would block loopback).
+	ollamaClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		},
+	}
+	resp, err := ollamaClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("ollama request failed: %w", err)
 	}

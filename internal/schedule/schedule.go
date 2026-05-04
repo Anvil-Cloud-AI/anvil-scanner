@@ -165,7 +165,7 @@ func removeMacOS() error {
 // correctly by cron(8). Single quotes are not used because the path itself
 // might contain a single quote (unusual but possible).
 func cronEntry(binaryPath string) (string, error) {
-	if strings.ContainsAny(binaryPath, "\"\\") {
+	if strings.ContainsAny(binaryPath, "\"\\\n") {
 		return "", fmt.Errorf("binary path contains characters unsafe for cron quoting: %s", binaryPath)
 	}
 	return fmt.Sprintf(`0 * * * * "%s" --no-ai  %s`, binaryPath, cronComment), nil

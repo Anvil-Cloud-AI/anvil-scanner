@@ -226,6 +226,73 @@ func TestLoadSecrets_EncryptedContainer(t *testing.T) {
 	}
 }
 
+// ── Smoke test: defer-zeroing does not corrupt the written output ─────────────
+
+// TestDecryptSecrets_DeferZeroingDoesNotCorruptOutput verifies that the
+// defer-based plaintext zeroing in DecryptSecrets fires AFTER writeSecureFile
+// has completed, not before.  If the defer fired prematurely it would zero the
+// []byte slice whose backing array had already been handed to the write path —
+// producing a NUL-filled file instead of the original plaintext.
+func TestDecryptSecrets_DeferZeroingDoesNotCorruptOutput(t *testing.T) {
+	const passphrase = "smoketestpassword1"
+	t.Setenv("ANVIL_SECRETS_PASSPHRASE", passphrase)
+
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	// Clear managed keys so the test environment is clean; restore on cleanup.
+	origVals := make(map[string]string)
+	for _, k := range ManagedKeys {
+		origVals[k] = os.Getenv(k)
+		os.Unsetenv(k) //nolint:errcheck
+	}
+	t.Cleanup(func() {
+		for k, v := range origVals {
+			if v != "" {
+				os.Setenv(k, v) //nolint:errcheck
+			} else {
+				os.Unsetenv(k) //nolint:errcheck
+			}
+		}
+	})
+
+	// Write a source .env with a known managed key value.
+	srcEnv := filepath.Join(dir, "smoke-source.env")
+	const wantValue = "sk-smoke-zero-test"
+	if err := os.WriteFile(srcEnv, []byte("CLAUDE_KEY="+wantValue+"\n"), 0o600); err != nil {
+		t.Fatalf("write source env: %v", err)
+	}
+
+	if err := EncryptSecrets(srcEnv, "passphrase"); err != nil {
+		t.Fatalf("EncryptSecrets: %v", err)
+	}
+
+	destEnv := filepath.Join(dir, "smoke-decrypted.env")
+	if err := DecryptSecrets(destEnv); err != nil {
+		t.Fatalf("DecryptSecrets: %v", err)
+	}
+
+	raw, err := os.ReadFile(destEnv)
+	if err != nil {
+		t.Fatalf("read decrypted env: %v", err)
+	}
+
+	// If defer-zeroing fired before writeSecureFile returned the file would
+	// contain NUL bytes — detect that explicitly.
+	for i, b := range raw {
+		if b == 0 {
+			t.Fatalf("decrypted file contains NUL byte at offset %d — "+
+				"defer zeroing may have fired before write completed", i)
+		}
+	}
+
+	got := parseEnvFile(string(raw))
+	if got["CLAUDE_KEY"] != wantValue {
+		t.Errorf("CLAUDE_KEY = %q, want %q — defer zeroing may have corrupted the output",
+			got["CLAUDE_KEY"], wantValue)
+	}
+}
+
 // ── Encrypt/Decrypt round-trip via scrypt backend ─────────────────────────────
 
 // TestEncryptDecryptRoundTrip_Scrypt exercises the full EncryptSecrets →

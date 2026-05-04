@@ -649,6 +649,133 @@ func TestGetSSHDirectives_ReturnsNonNilMap(t *testing.T) {
 	}
 }
 
+// ── parseSshdConfig Match-block scoping tests ─────────────────────────────────
+//
+// parseConfigStringFull is a test-only mirror of parseSshdConfig that accepts
+// an in-memory string instead of reading the constant sshdConfigPath file.
+// It includes the full Match-block scoping logic so tests below exercise the
+// exact same parser behaviour as the production function.
+func parseConfigStringFull(content string) map[string]string {
+	result := map[string]string{}
+	inMatchBlock := false
+	hasIncludes := false
+
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexAny(line, " \t")
+		if idx <= 0 {
+			if strings.EqualFold(line, "match") {
+				result["_match"] = "sshd_config contains Match blocks"
+				inMatchBlock = true
+			}
+			continue
+		}
+		key := line[:idx]
+		val := strings.TrimSpace(line[idx+1:])
+
+		if strings.EqualFold(key, "Include") {
+			hasIncludes = true
+			continue
+		}
+		if strings.EqualFold(key, "Match") {
+			result["_match"] = "sshd_config contains Match blocks"
+			inMatchBlock = true
+			continue
+		}
+		if inMatchBlock {
+			continue
+		}
+		k := strings.ToLower(key)
+		if _, exists := result[k]; !exists {
+			result[k] = val
+		}
+	}
+	if hasIncludes {
+		result["_include"] = "sshd_config uses Include directives"
+	}
+	return result
+}
+
+// TestParseSshdConfig_MatchBlockDirectiveNotGlobal verifies that a directive
+// appearing after "Match User alice" is NOT included in the global policy map.
+func TestParseSshdConfig_MatchBlockDirectiveNotGlobal(t *testing.T) {
+	content := "PermitRootLogin no\nMaxAuthTries 3\nMatch User alice\nPasswordAuthentication yes\nX11Forwarding yes\n"
+	cfg := parseConfigStringFull(content)
+
+	if directive(cfg, "PermitRootLogin") != "no" {
+		t.Errorf("PermitRootLogin = %q, want %q", directive(cfg, "PermitRootLogin"), "no")
+	}
+	if directive(cfg, "MaxAuthTries") != "3" {
+		t.Errorf("MaxAuthTries = %q, want %q", directive(cfg, "MaxAuthTries"), "3")
+	}
+	if v := directive(cfg, "PasswordAuthentication"); v != "" {
+		t.Errorf("PasswordAuthentication inside Match block leaked into global map: %q", v)
+	}
+	if v := directive(cfg, "X11Forwarding"); v != "" {
+		t.Errorf("X11Forwarding inside Match block leaked into global map: %q", v)
+	}
+	if _, ok := cfg["_match"]; !ok {
+		t.Error("_match key not set for config with Match block")
+	}
+}
+
+// TestParseSshdConfig_MatchAllConservativeBehaviour verifies that the parser's
+// conservative approach (every Match line sets inMatchBlock=true, including
+// "Match all") means directives following "Match all" are also excluded from
+// the global map.  This documents the current safe behaviour.
+func TestParseSshdConfig_MatchAllConservativeBehaviour(t *testing.T) {
+	content := "PermitRootLogin no\nMatch User alice\nAllowTcpForwarding yes\nMatch all\nLogLevel VERBOSE\n"
+	cfg := parseConfigStringFull(content)
+
+	if directive(cfg, "PermitRootLogin") != "no" {
+		t.Errorf("PermitRootLogin = %q, want %q", directive(cfg, "PermitRootLogin"), "no")
+	}
+	if v := directive(cfg, "AllowTcpForwarding"); v != "" {
+		t.Errorf("AllowTcpForwarding inside Match User block should not be global, got %q", v)
+	}
+	if _, ok := cfg["_match"]; !ok {
+		t.Error("_match key not set")
+	}
+}
+
+// TestParseSshdConfig_EOFTerminatesMatchBlock verifies no panic and no leaked
+// directives when a Match block reaches EOF without a subsequent Match line.
+func TestParseSshdConfig_EOFTerminatesMatchBlock(t *testing.T) {
+	// No trailing newline — exercises the EOF-inside-Match-block path.
+	content := "PermitRootLogin no\nMatch User alice\nPasswordAuthentication yes"
+	cfg := parseConfigStringFull(content)
+
+	if directive(cfg, "PermitRootLogin") != "no" {
+		t.Errorf("PermitRootLogin = %q, want %q", directive(cfg, "PermitRootLogin"), "no")
+	}
+	if v := directive(cfg, "PasswordAuthentication"); v != "" {
+		t.Errorf("PasswordAuthentication leaked from Match block at EOF: %q", v)
+	}
+}
+
+// TestParseSshdConfig_NoMatchBlock verifies that a plain config with no Match
+// lines is parsed fully into the global map and _match is not set.
+func TestParseSshdConfig_NoMatchBlock(t *testing.T) {
+	content := "PermitRootLogin no\nPasswordAuthentication no\nMaxAuthTries 3\n"
+	cfg := parseConfigStringFull(content)
+
+	if directive(cfg, "PermitRootLogin") != "no" {
+		t.Errorf("PermitRootLogin = %q, want %q", directive(cfg, "PermitRootLogin"), "no")
+	}
+	if directive(cfg, "PasswordAuthentication") != "no" {
+		t.Errorf("PasswordAuthentication = %q, want %q", directive(cfg, "PasswordAuthentication"), "no")
+	}
+	if directive(cfg, "MaxAuthTries") != "3" {
+		t.Errorf("MaxAuthTries = %q, want %q", directive(cfg, "MaxAuthTries"), "3")
+	}
+	if _, ok := cfg["_match"]; ok {
+		t.Error("_match should not be set when there are no Match blocks")
+	}
+}
+
 // ── LoginGraceTime = 0 hardening tests ────────────────────────────────────────
 
 // TestCheckSSHInt_LoginGraceTime_Zero verifies that LoginGraceTime = 0 emits

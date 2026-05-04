@@ -293,6 +293,80 @@ func TestRevertSession_AllowlistAcceptsEtcPath(t *testing.T) {
 	}
 }
 
+// ── Backup() path-containment tests ──────────────────────────────────────────
+
+// TestBackup_DotDotEscapeRejected verifies that a path containing ".."
+// components that would escape the session directory is rejected by Backup()
+// and returns false without writing any file outside the session dir.
+func TestBackup_DotDotEscapeRejected(t *testing.T) {
+	backupRoot := t.TempDir()
+	orig := backupRootFn
+	backupRootFn = func() (string, error) { return backupRoot, nil }
+	defer func() { backupRootFn = orig }()
+
+	// Build a session dir nested one level inside backupRoot.
+	evilSession := filepath.Join(backupRoot, "sub", "session")
+	if err := os.MkdirAll(evilSession, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{
+		BackupRoot: backupRoot,
+		SessionDir: evilSession,
+		sessionTS:  "sub_session",
+	}
+
+	// Craft a path that uses ".." to escape the session dir.
+	// filepath.Join cleans the ".." away syntactically, so we build the raw
+	// string manually to produce a path that is absolute but resolves outside
+	// evilSession.
+	craftedPath := evilSession + "/../../etc/passwd"
+
+	// The crafted path does not exist on disk (os.Stat will fail), so Backup
+	// returns false at the stat guard — this is still the correct safety
+	// outcome. If somehow the path did exist on the CI machine the containment
+	// guard must block it before any write occurs.
+	result := m.Backup(craftedPath, "escape attempt via ..")
+	if result {
+		t.Error("Backup() returned true for a path that escapes sessionDir via '..'; want false")
+	}
+}
+
+// TestBackup_NormalPathSucceeds verifies that a legitimate source file can be
+// backed up successfully — the happy path for the containment guard.
+func TestBackup_NormalPathSucceeds(t *testing.T) {
+	backupRoot := t.TempDir()
+	orig := backupRootFn
+	backupRootFn = func() (string, error) { return backupRoot, nil }
+	defer func() { backupRootFn = orig }()
+
+	m, err := NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	// Write a real source file in a separate temp dir.
+	srcDir := t.TempDir()
+	src := filepath.Join(srcDir, "normal.conf")
+	if err := os.WriteFile(src, []byte("Port 22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := m.Backup(src, "normal config backup")
+	if !result {
+		t.Error("Backup() returned false for a normal path; want true")
+	}
+	if !m.HasBackups() {
+		t.Error("HasBackups() returned false after a successful Backup()")
+	}
+
+	// The backup file must exist inside the session dir.
+	rel := strings.TrimPrefix(src, "/")
+	dest := filepath.Join(m.SessionDir, rel)
+	if _, err := os.Stat(dest); err != nil {
+		t.Errorf("backup file not found at expected dest %s: %v", dest, err)
+	}
+}
+
 // TestRevertSession_AllowlistRejectsVarTmp verifies that a manifest entry
 // whose Original resolves under /var/tmp is rejected by the allowlist.
 // /var/tmp is used by attackers in IOC scenarios and must not be a valid
