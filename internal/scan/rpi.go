@@ -160,8 +160,15 @@ func rpi001DefaultPassword(b *CheckBuilder) {
 	// Verify via python3 — Go's stdlib has no crypt(3) binding.
 	// Pass the hash via stdin to avoid embedding /etc/shadow content in a
 	// -c argument string where %q Go-escapes rather than Python-escapes it.
-	// The crypt module was removed in Python 3.13; fall back to passlib then
-	// hashlib-based SHA-512.
+	// The crypt module was removed in Python 3.13; fall back to passlib.
+	//
+	// The passlib branch uses sha512_crypt.verify(pw, h) which handles both
+	// $6$<salt>$<hash> and $6$rounds=N$<salt>$<hash> internally, avoiding the
+	// broken h[3:19] salt-slice that misidentified the rounds parameter as the
+	// salt for explicit-rounds hashes.
+	//
+	// The crypt branch still hashes and compares against piHash directly; the
+	// passlib branch emits MATCH / NOMATCH so the Go switch below handles both.
 	const pyScript = `
 import sys
 h = sys.stdin.read().strip()
@@ -174,7 +181,10 @@ except ImportError:
     pass
 try:
     from passlib.hash import sha512_crypt
-    print(sha512_crypt.hash(pw, rounds=5000, salt=h[3:19]) if h.startswith('$6$') else 'UNSUPPORTED')
+    if h.startswith('$6$'):
+        print('MATCH' if sha512_crypt.verify(pw, h) else 'NOMATCH')
+    else:
+        print('UNSUPPORTED')
     sys.exit(0)
 except ImportError:
     pass
@@ -185,10 +195,13 @@ print('UNAVAILABLE')
 	res := exec.RunCtx(ctx, strings.NewReader(piHash), "python3", "-c", pyScript)
 	out := strings.TrimSpace(res.Stdout)
 	switch {
-	case res.Success() && out == piHash:
+	case res.Success() && (out == piHash || out == "MATCH"):
 		b.Fail("RPI-001", "Default 'pi' user password",
 			"CRITICAL: 'pi' user still has the default password 'raspberry'. "+
 				"Change immediately: sudo passwd pi", SeverityCritical)
+	case res.Success() && out == "NOMATCH":
+		b.Pass("RPI-001", "Default 'pi' user password",
+			"'pi' user password has been changed from default", SeverityCritical)
 	case res.Success() && out == "UNAVAILABLE":
 		b.Warn("RPI-001", "Default 'pi' user password",
 			"python3 crypt library unavailable (Python 3.13+ removed it); cannot verify default password — check manually: sudo passwd pi",
@@ -198,6 +211,8 @@ print('UNAVAILABLE')
 			"Hash format not supported by available python3 libraries; cannot verify default password — check manually: sudo passwd pi",
 			SeverityCritical)
 	case res.Success():
+		// crypt branch: out is the re-hashed value; if it doesn't equal piHash
+		// the password has been changed.
 		b.Pass("RPI-001", "Default 'pi' user password",
 			"'pi' user password has been changed from default", SeverityCritical)
 	default:

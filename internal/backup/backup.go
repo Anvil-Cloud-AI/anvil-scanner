@@ -556,7 +556,7 @@ func removeFirewallRules(w io.Writer) {
 					}
 				}
 				tmp := pfConf + ".anvil-tmp"
-				if err2 := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), 0o600); err2 == nil {
+				if err2 := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), 0o644); err2 == nil {
 					if err3 := os.Rename(tmp, pfConf); err3 == nil {
 						fmt.Fprintf(w, "OK: Removed anvil-scanner reference from pf.conf\n")
 					}

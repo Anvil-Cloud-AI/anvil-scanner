@@ -10,6 +10,90 @@ import (
 	"testing"
 )
 
+// ── checkSSHKeys absolute-path guard tests ────────────────────────────────────
+
+// parsePasswdHomeDirs replicates the absolute-path guard from checkSSHKeys
+// (ioc.go lines 469-479) so it can be exercised in isolation without touching
+// the real /etc/passwd or the full checkSSHKeys call chain.
+// It returns only the authorized_keys paths derived from absolute home dirs.
+func parsePasswdHomeDirs(passwdContent string) []string {
+	var paths []string
+	for _, line := range strings.Split(passwdContent, "\n") {
+		parts := strings.Split(line, ":")
+		if len(parts) < 6 {
+			continue
+		}
+		home := parts[5]
+		if !filepath.IsAbs(home) {
+			continue // mirrors the guard in checkSSHKeys
+		}
+		paths = append(paths, filepath.Join(home, ".ssh", "authorized_keys"))
+	}
+	return paths
+}
+
+// TestCheckSSHKeys_AbsolutePathGuard verifies that a passwd entry with a
+// relative home directory ("tmp") is skipped, while one with an absolute home
+// ("/home/testuser") produces an authorized_keys path.
+func TestCheckSSHKeys_AbsolutePathGuard(t *testing.T) {
+	// Format: user:pw:uid:gid:gecos:home:shell
+	passwd := strings.Join([]string{
+		"reluser:x:1001:1001::tmp:/bin/bash",            // relative home — must be skipped
+		"absuser:x:1002:1002::/home/testuser:/bin/bash", // absolute home — must be included
+	}, "\n")
+
+	paths := parsePasswdHomeDirs(passwd)
+
+	if len(paths) != 1 {
+		t.Fatalf("expected 1 authorized_keys path (absolute home only), got %d: %v", len(paths), paths)
+	}
+	want := "/home/testuser/.ssh/authorized_keys"
+	if paths[0] != want {
+		t.Errorf("paths[0] = %q; want %q", paths[0], want)
+	}
+}
+
+// TestCheckSSHKeys_RelativeHomeSkipped verifies a purely relative home dir
+// (no leading slash) produces no authorized_keys paths.
+func TestCheckSSHKeys_RelativeHomeSkipped(t *testing.T) {
+	passwd := "svcuser:x:999:999::tmp:/usr/sbin/nologin\n"
+	paths := parsePasswdHomeDirs(passwd)
+	if len(paths) != 0 {
+		t.Errorf("expected 0 paths for relative home 'tmp', got %d: %v", len(paths), paths)
+	}
+}
+
+// TestCheckSSHKeys_MultipleAbsoluteHomes verifies multiple absolute-home
+// entries each produce an authorized_keys path; relative entries are skipped.
+func TestCheckSSHKeys_MultipleAbsoluteHomes(t *testing.T) {
+	passwd := strings.Join([]string{
+		"alice:x:1001:1001::/home/alice:/bin/bash",
+		"bob:x:1002:1002::/home/bob:/bin/bash",
+		"svc:x:999:999::tmp:/usr/sbin/nologin", // relative — skipped
+	}, "\n")
+
+	paths := parsePasswdHomeDirs(passwd)
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 absolute-home paths, got %d: %v", len(paths), paths)
+	}
+	for _, p := range paths {
+		if !filepath.IsAbs(p) {
+			t.Errorf("derived path %q should be absolute", p)
+		}
+		if !strings.HasSuffix(p, "/.ssh/authorized_keys") {
+			t.Errorf("derived path %q should end with /.ssh/authorized_keys", p)
+		}
+	}
+}
+
+// TestCheckSSHKeys_EmptyPasswd verifies no paths are returned for empty input.
+func TestCheckSSHKeys_EmptyPasswd(t *testing.T) {
+	paths := parsePasswdHomeDirs("")
+	if len(paths) != 0 {
+		t.Errorf("expected 0 paths for empty passwd, got %d: %v", len(paths), paths)
+	}
+}
+
 // ---- isPrivateIP ------------------------------------------------------------
 
 // TestIsPrivateIP_TableDriven covers RFC-1918 ranges, loopback, link-local,

@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,7 +54,7 @@ func runDirectiveChecks(b *CheckBuilder, cfg map[string]string) {
 	)
 	checkSSHInt(b, cfg, "SSH-008", "LoginGraceTime ≤ 60s", "LoginGraceTime",
 		true,
-		func(v int) bool { return v <= 60 },
+		func(v int) bool { return v > 0 && v <= 60 },
 		func(v int) string { return formatf("LoginGraceTime = %ds", v) },
 		func(v int) string { return formatf("LoginGraceTime = %ds (should be ≤ 60)", v) },
 		"LoginGraceTime not set (default is 120, should be ≤ 60)",
@@ -75,10 +76,7 @@ func runDirectiveChecks(b *CheckBuilder, cfg map[string]string) {
 }
 
 func formatf(format string, args ...any) string {
-	if len(args) == 0 {
-		return format
-	}
-	return strings.NewReplacer().Replace(format) // simple: just fmt.Sprintf would recurse
+	return fmt.Sprintf(format, args...)
 }
 
 // parseConfigString is a test-only helper that applies the same parsing logic

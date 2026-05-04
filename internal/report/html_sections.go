@@ -155,7 +155,7 @@ func renderExtendedChecks(checks []scan.Check) string {
 			`<h3 style="margin:18px 0 8px;font-size:.92rem;color:#cbd5e1;">%s</h3>`+
 				`<table><tr><th style="width:80px;">ID</th><th>Check</th><th style="width:90px;">Status</th>`+
 				`<th>Detail</th><th style="width:90px;">Severity</th></tr>%s</table>`,
-			label, rows,
+			e(label), rows,
 		)
 
 		// Quick-fix hint for SSH failures

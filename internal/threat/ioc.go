@@ -337,7 +337,10 @@ func checkC2Connections(result *LocalIOCResult) {
 			remoteHex := strings.ToUpper(remote[:colonIdx])
 			if entry, ok := c2Hex[remoteHex]; ok {
 				portHex := remote[colonIdx+1:]
-				port, _ := strconv.ParseInt(portHex, 16, 32)
+				port, err := strconv.ParseInt(portHex, 16, 32)
+				if err != nil {
+					continue
+				}
 				result.SuspiciousProcesses = append(result.SuspiciousProcesses,
 					fmt.Sprintf("Active TCP connection to known C2 %s:%d — %s", entry.ip, port, entry.label))
 			}

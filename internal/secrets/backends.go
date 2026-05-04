@@ -37,7 +37,14 @@ func storeKeyringMasterKey(key []byte) error {
 	encoded := base64.StdEncoding.EncodeToString(key)
 	switch runtime.GOOS {
 	case "darwin":
-		r := iexec.Run("security", "add-generic-password",
+		// macOS security(1) does not support reading the password from stdin;
+		// the value must be supplied via the -w flag. This means the base64-encoded
+		// key is briefly visible in the process argument list (ps aux / KERN_PROCARGS2)
+		// during subprocess execution. The exposure window is limited to the duration
+		// of the security(1) call, which is bounded by keyringTimeout below.
+		ctx, cancel := context.WithTimeout(context.Background(), keyringTimeout)
+		defer cancel()
+		r := iexec.RunCtx(ctx, nil, "security", "add-generic-password",
 			"-U",
 			"-s", keyringService,
 			"-a", keyringAccount,
@@ -110,7 +117,7 @@ func deleteKeyringMasterKey() error {
 		if r.ExitCode == 44 || r.Success() {
 			return nil
 		}
-		return fmt.Errorf("secrets: keyring delete failed (exit %d): %s", r.ExitCode, r.Stderr)
+		return fmt.Errorf("secrets: keyring delete failed (exit %d): see system keyring logs", r.ExitCode)
 	default: // linux
 		r := iexec.Run("secret-tool", "clear",
 			"service", keyringService,
@@ -120,7 +127,7 @@ func deleteKeyringMasterKey() error {
 		if r.Success() {
 			return nil
 		}
-		return fmt.Errorf("secrets: keyring delete failed (exit %d): %s", r.ExitCode, r.Stderr)
+		return fmt.Errorf("secrets: keyring delete failed (exit %d): see system keyring logs", r.ExitCode)
 	}
 }
 
@@ -129,7 +136,9 @@ func deleteKeyringMasterKey() error {
 func storeKeyringProbe() error {
 	switch runtime.GOOS {
 	case "darwin":
-		r := iexec.Run("security", "add-generic-password",
+		ctx, cancel := context.WithTimeout(context.Background(), keyringTimeout)
+		defer cancel()
+		r := iexec.RunCtx(ctx, nil, "security", "add-generic-password",
 			"-U",
 			"-s", keyringService,
 			"-a", keyringProbeAccount,
@@ -303,7 +312,13 @@ func storeKeyringSecret(name, value string) error {
 	account := keyringAccount + "/" + name
 	switch runtime.GOOS {
 	case "darwin":
-		r := iexec.Run("security", "add-generic-password",
+		// macOS security(1) does not support reading the password from stdin;
+		// the value must be supplied via the -w flag. This means the secret value
+		// is briefly visible in the process argument list (ps aux / KERN_PROCARGS2)
+		// during subprocess execution. The exposure window is bounded by keyringTimeout.
+		ctx, cancel := context.WithTimeout(context.Background(), keyringTimeout)
+		defer cancel()
+		r := iexec.RunCtx(ctx, nil, "security", "add-generic-password",
 			"-U",
 			"-s", keyringService,
 			"-a", account,

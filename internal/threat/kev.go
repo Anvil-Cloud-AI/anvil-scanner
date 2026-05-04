@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -73,7 +74,13 @@ func fetchKEVFeed() (*kevFeed, float64, string) {
 	}
 
 	// Fetch from network.
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSHandshakeTimeout: 5 * time.Second,
+			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		},
+	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, kevFeedURL, nil)
 	if err != nil {
 		return nil, 0, fmt.Sprintf("KEV request build failed: %v", err)

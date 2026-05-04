@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 
 	iexec "github.com/Anvil-Cloud-AI/anvil-scanner/internal/exec"
@@ -139,7 +140,7 @@ func normalizeVersion(v string) string {
 	return v
 }
 
-var digitRE = regexp.MustCompile(`^(\d+)`)
+var digitRE = regexp.MustCompile(`^\d+`)
 
 // versionLT returns true when installed < threshold. It strips epoch prefixes
 // (e.g. "1:9.7p1") and pre-release suffixes, then compares numeric dotted
@@ -154,8 +155,7 @@ func versionLT(installed, threshold string) bool {
 			if m == "" {
 				break
 			}
-			n := 0
-			fmt.Sscan(m, &n)
+			n, _ := strconv.Atoi(m) // m is guaranteed [0-9]+ by digitRE
 			parts = append(parts, n)
 		}
 		return parts

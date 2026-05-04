@@ -6,6 +6,7 @@ package threat
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -101,7 +102,14 @@ func getPublicIP() string {
 	}
 	req.Header.Set("User-Agent", "anvil-scanner/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSHandshakeTimeout: 5 * time.Second,
+			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return ""
 	}

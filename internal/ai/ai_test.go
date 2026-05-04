@@ -209,3 +209,64 @@ func TestBuildPrompt_ContainsKeyFields(t *testing.T) {
 		}
 	}
 }
+
+// ── BuildPrompt additional coverage ──────────────────────────────────────────
+
+// TestBuildPrompt_ValidInputsReturnNonEmptyStringAndNilError verifies the
+// primary contract: valid inputs yield a non-empty prompt string and nil error.
+func TestBuildPrompt_ValidInputsReturnNonEmptyStringAndNilError(t *testing.T) {
+	tests := []struct {
+		name           string
+		platform       string
+		openPorts      []string
+		pendingUpdates int
+		priorityCount  int
+	}{
+		{"darwin no ports", "Darwin", []string{}, 0, 0},
+		{"linux with ports", "Linux", []string{"22", "80", "443"}, 12, 5},
+		{"empty platform", "", []string{"8080"}, 1, 1},
+		{"large counts", "Linux", []string{"22"}, 999, 50},
+		{"nil ports slice", "Darwin", nil, 0, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt, err := BuildPrompt(tc.platform, tc.openPorts, tc.pendingUpdates, tc.priorityCount)
+			if err != nil {
+				t.Fatalf("BuildPrompt() returned unexpected error: %v", err)
+			}
+			if prompt == "" {
+				t.Error("BuildPrompt() returned empty string; want non-empty prompt")
+			}
+		})
+	}
+}
+
+// TestBuildPrompt_ContainsJSONSchema verifies the prompt includes the required
+// JSON schema fields so the AI provider knows the expected response format.
+func TestBuildPrompt_ContainsJSONSchema(t *testing.T) {
+	prompt, err := BuildPrompt("Linux", []string{"22"}, 3, 2)
+	if err != nil {
+		t.Fatalf("BuildPrompt() error: %v", err)
+	}
+	for _, field := range []string{"risk_score", "overview", "risks", "recommendations"} {
+		if !strings.Contains(prompt, field) {
+			t.Errorf("BuildPrompt() prompt missing JSON schema field %q", field)
+		}
+	}
+}
+
+// TestBuildPrompt_PlatformAppearsInPrompt verifies the platform string is
+// embedded in the prompt so the AI can tailor its response.
+func TestBuildPrompt_PlatformAppearsInPrompt(t *testing.T) {
+	for _, platform := range []string{"Darwin", "Linux", "Raspberry Pi"} {
+		t.Run(platform, func(t *testing.T) {
+			prompt, err := BuildPrompt(platform, []string{}, 0, 0)
+			if err != nil {
+				t.Fatalf("BuildPrompt() error: %v", err)
+			}
+			if !strings.Contains(prompt, platform) {
+				t.Errorf("BuildPrompt() prompt does not contain platform %q", platform)
+			}
+		})
+	}
+}

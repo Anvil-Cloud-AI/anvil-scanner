@@ -98,12 +98,21 @@ func parseSshdConfig() map[string]string {
 	defer f.Close()
 
 	hasIncludes := false
+	inMatchBlock := false
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		raw := scanner.Text()
+		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		// A line with leading whitespace inside a Match block — skip it.
+		if inMatchBlock && (strings.HasPrefix(raw, " ") || strings.HasPrefix(raw, "\t")) {
+			continue
+		}
+		// Non-indented line resets the Match block scope.
+		inMatchBlock = false
+
 		// sshd_config allows space or tab as the separator between keyword and value.
 		// SplitN on a single space would miss tab-separated directives.
 		idx := strings.IndexAny(line, " \t")
@@ -116,7 +125,16 @@ func parseSshdConfig() map[string]string {
 			hasIncludes = true
 			continue
 		}
-		result[strings.ToLower(key)] = val
+		if strings.EqualFold(key, "Match") {
+			result["_match"] = "sshd_config contains Match blocks — some directives may be scoped to specific sessions and not apply globally"
+			inMatchBlock = true
+			continue
+		}
+		// First-match-wins: sshd uses the first occurrence of a directive.
+		k := strings.ToLower(key)
+		if _, exists := result[k]; !exists {
+			result[k] = val
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		result["_error"] = fmt.Sprintf("read error: %v", err)
@@ -133,9 +151,37 @@ func directive(cfg map[string]string, key string) string {
 	return cfg[strings.ToLower(key)]
 }
 
+// parseSSHDSeconds converts an OpenSSH time value to seconds.
+// OpenSSH accepts bare integers (seconds) or a numeric value followed by
+// a unit suffix: s (seconds), m (minutes), h (hours), d (days), w (weeks).
+// Returns the number of seconds and true on success, or 0, false on error.
+func parseSSHDSeconds(val string) (int, bool) {
+	if len(val) == 0 {
+		return 0, false
+	}
+	multipliers := map[byte]int{
+		's': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800,
+	}
+	last := val[len(val)-1]
+	if mult, ok := multipliers[last]; ok {
+		n, err := strconv.Atoi(val[:len(val)-1])
+		if err != nil || n < 0 {
+			return 0, false
+		}
+		return n * mult, true
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 // checkSSHInt evaluates a numeric sshd_config directive.
 // testFn(value) should return true when the value passes the check.
 // passMsgFn / failMsgFn produce the detail string given the parsed int.
+// When trimSuffix is true the value is treated as an OpenSSH time value
+// (e.g. "30s", "1m", "2h") and parsed via parseSSHDSeconds.
 func checkSSHInt(
 	b *CheckBuilder,
 	cfg map[string]string,
@@ -152,15 +198,22 @@ func checkSSHInt(
 		b.Warn(id, name, warnMsg, sev)
 		return
 	}
-	// LoginGraceTime may have a trailing "s"; strip it before parsing.
-	stripped := val
+	var iv int
 	if trimSuffix {
-		stripped = strings.TrimSuffix(val, "s")
-	}
-	iv, err := strconv.Atoi(stripped)
-	if err != nil {
-		b.Warn(id, name, fmt.Sprintf("%s value not parseable: %s", key, val), sev)
-		return
+		// Use the full OpenSSH time-unit parser (s/m/h/d/w).
+		parsed, ok := parseSSHDSeconds(val)
+		if !ok {
+			b.Warn(id, name, fmt.Sprintf("%s value not parseable: %s", key, val), sev)
+			return
+		}
+		iv = parsed
+	} else {
+		var err error
+		iv, err = strconv.Atoi(val)
+		if err != nil {
+			b.Warn(id, name, fmt.Sprintf("%s value not parseable: %s", key, val), sev)
+			return
+		}
 	}
 	if testFn(iv) {
 		b.Pass(id, name, passMsgFn(iv), sev)

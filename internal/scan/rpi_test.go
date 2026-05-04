@@ -3,6 +3,8 @@
 package scan
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -93,5 +95,93 @@ func TestRPI012_SkipWhenNoVcgencmd(t *testing.T) {
 	// Skip or whatever the host reports — but severity must be medium.
 	if r.Checks[0].Severity != SeverityMedium {
 		t.Errorf("RPI-012 severity must be medium, got %s", r.Checks[0].Severity)
+	}
+}
+
+// ── gpu_mem config parser tests ───────────────────────────────────────────────
+
+// parseGPUMem replicates the inline gpu_mem parsing logic from rpi009GPUMemory
+// so it can be unit-tested without touching the real filesystem.
+// It mirrors the exact logic in rpi.go lines 437-448:
+//
+//	for _, line := range strings.Split(data, "\n") {
+//	    stripped := strings.TrimSpace(line)
+//	    if strings.HasPrefix(stripped, "gpu_mem=") && !strings.HasPrefix(stripped, "#") {
+//	        rawVal := strings.TrimSpace(strings.SplitN(stripped, "=", 2)[1])
+//	        if i := strings.IndexByte(rawVal, '#'); i >= 0 {
+//	            rawVal = strings.TrimSpace(rawVal[:i])
+//	        }
+//	        if v, err := strconv.Atoi(rawVal); err == nil { gpuMem = &v }
+//	    }
+//	}
+func parseGPUMem(configContent string) *int {
+	for _, line := range strings.Split(configContent, "\n") {
+		stripped := strings.TrimSpace(line)
+		if strings.HasPrefix(stripped, "gpu_mem=") && !strings.HasPrefix(stripped, "#") {
+			rawVal := strings.TrimSpace(strings.SplitN(stripped, "=", 2)[1])
+			if i := strings.IndexByte(rawVal, '#'); i >= 0 {
+				rawVal = strings.TrimSpace(rawVal[:i])
+			}
+			if v, err := strconv.Atoi(rawVal); err == nil {
+				return &v
+			}
+		}
+	}
+	return nil
+}
+
+// TestParseGPUMem_InlineComment verifies that a value with a trailing inline
+// comment ("gpu_mem=16 # save RAM") is parsed as 16, not nil.
+func TestParseGPUMem_InlineComment(t *testing.T) {
+	got := parseGPUMem("gpu_mem=16 # save RAM\n")
+	if got == nil {
+		t.Fatal("parseGPUMem returned nil for 'gpu_mem=16 # save RAM'; want 16")
+	}
+	if *got != 16 {
+		t.Errorf("parseGPUMem = %d; want 16", *got)
+	}
+}
+
+// TestParseGPUMem_NoComment verifies the normal case: "gpu_mem=64" with no
+// comment is parsed as 64.
+func TestParseGPUMem_NoComment(t *testing.T) {
+	got := parseGPUMem("gpu_mem=64\n")
+	if got == nil {
+		t.Fatal("parseGPUMem returned nil for 'gpu_mem=64'; want 64")
+	}
+	if *got != 64 {
+		t.Errorf("parseGPUMem = %d; want 64", *got)
+	}
+}
+
+// TestParseGPUMem_NotSet verifies that a config with no gpu_mem line returns nil.
+func TestParseGPUMem_NotSet(t *testing.T) {
+	got := parseGPUMem("# Raspberry Pi config\ndtoverlay=vc4-kms-v3d\n")
+	if got != nil {
+		t.Errorf("parseGPUMem = %d; want nil when gpu_mem not set", *got)
+	}
+}
+
+// TestParseGPUMem_CommentedOut verifies that a commented-out gpu_mem line is
+// skipped; the next uncommented line is used.
+func TestParseGPUMem_CommentedOut(t *testing.T) {
+	got := parseGPUMem("# gpu_mem=128\ngpu_mem=16\n")
+	if got == nil {
+		t.Fatal("parseGPUMem returned nil; should find uncommented gpu_mem=16")
+	}
+	if *got != 16 {
+		t.Errorf("parseGPUMem = %d; want 16", *got)
+	}
+}
+
+// TestParseGPUMem_TabBeforeHash verifies comment stripping works when a tab
+// precedes the inline # comment.
+func TestParseGPUMem_TabBeforeHash(t *testing.T) {
+	got := parseGPUMem("gpu_mem=32\t# minimum for desktop\n")
+	if got == nil {
+		t.Fatal("parseGPUMem returned nil for tab-comment form; want 32")
+	}
+	if *got != 32 {
+		t.Errorf("parseGPUMem = %d; want 32", *got)
 	}
 }

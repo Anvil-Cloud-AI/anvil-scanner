@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"golang.org/x/crypto/scrypt"
@@ -140,6 +141,12 @@ func unpackContainer(blob []byte) (hdr *containerHeader, ciphertext []byte, lega
 	if h.KDF == kdfScrypt {
 		if err := validateScryptParams(h.N, h.R, h.P); err != nil {
 			return nil, nil, false, err
+		}
+		if h.N < scryptN {
+			fmt.Fprintf(os.Stderr,
+				"WARNING: secrets container uses weak scrypt parameters (N=%d, recommended N=%d). "+
+					"Run with --rotate-key-backend to upgrade.\n",
+				h.N, scryptN)
 		}
 		if h.Salt == "" {
 			return nil, nil, false, errors.New("secrets: scrypt container missing salt")

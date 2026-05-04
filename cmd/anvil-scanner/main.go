@@ -11,11 +11,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/ai"
@@ -32,13 +34,16 @@ import (
 var Version = "0.0.0-dev"
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "anvil-scanner:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+func run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("anvil-scanner", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
@@ -212,7 +217,7 @@ func run(args []string) error {
 			fmt.Fprintf(os.Stderr, "AI prompt error: %s\n", promptErr)
 			analysis = ai.Analysis{Error: promptErr.Error()}
 		} else {
-			analysis = ai.Analyze(context.Background(), prompt, false, aiProvider)
+			analysis = ai.Analyze(ctx, prompt, false, aiProvider)
 		}
 		if analysis.Error != "" {
 			fmt.Fprintf(os.Stderr, "AI analysis error: %s\n", analysis.Error)

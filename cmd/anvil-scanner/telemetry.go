@@ -9,9 +9,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/report"
@@ -59,9 +62,13 @@ func getDeploymentID() string {
 	dir := filepath.Join(home, ".anvil-scanner")
 	idFile := filepath.Join(dir, "deployment_id")
 
-	if data, err := os.ReadFile(idFile); err == nil {
-		if id := string(data); id != "" {
-			return id
+	if raw, err := os.ReadFile(idFile); err == nil {
+		id := strings.TrimSpace(string(raw))
+		if len(id) <= 64 {
+			matched, _ := regexp.MatchString(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`, id)
+			if matched {
+				return id
+			}
 		}
 	}
 
@@ -142,7 +149,9 @@ func submitTelemetry(rd report.Data) {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+			TLSHandshakeTimeout: 5 * time.Second,
+			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
 		},
 	}
 	req, err := http.NewRequestWithContext(context.Background(), "POST", telemetryEndpoint, bytes.NewReader(body))

@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -645,5 +646,81 @@ func TestGetSSHDirectives_ReturnsNonNilMap(t *testing.T) {
 	got := GetSSHDirectives()
 	if got == nil {
 		t.Error("GetSSHDirectives() returned nil map")
+	}
+}
+
+// ── LoginGraceTime = 0 hardening tests ────────────────────────────────────────
+
+// TestCheckSSHInt_LoginGraceTime_Zero verifies that LoginGraceTime = 0 emits
+// FAIL. The value 0 means "unlimited grace period" which is insecure.
+// The check's testFn is `v > 0 && v <= 60`, so 0 must fail (not pass).
+func TestCheckSSHInt_LoginGraceTime_Zero(t *testing.T) {
+	b := NewBuilder(WithClock(fixedClock()))
+	cfg := map[string]string{"logingracetime": "0"}
+	checkSSHInt(b, cfg, "SSH-008", "LoginGraceTime ≤ 60s", "LoginGraceTime",
+		true,
+		func(v int) bool { return v > 0 && v <= 60 },
+		func(v int) string { return fmt.Sprintf("LoginGraceTime = %ds", v) },
+		func(v int) string {
+			return fmt.Sprintf("LoginGraceTime = %ds (should be between 1 and 60 seconds; 0 means unlimited)", v)
+		},
+		"LoginGraceTime not set (default is 120, should be ≤ 60)",
+		SeverityMedium,
+	)
+	r := b.Build()
+	if len(r.Checks) != 1 {
+		t.Fatalf("expected 1 check, got %d", len(r.Checks))
+	}
+	if r.Checks[0].Status != StatusFail {
+		t.Errorf("LoginGraceTime=0 must produce FAIL (0 means unlimited), got %s detail=%q",
+			r.Checks[0].Status, r.Checks[0].Detail)
+	}
+	if !strings.Contains(r.Checks[0].Detail, "unlimited") {
+		t.Errorf("FAIL detail should mention 'unlimited', got %q", r.Checks[0].Detail)
+	}
+}
+
+// TestCheckSSHInt_LoginGraceTime_ZeroWithSuffix verifies the same FAIL
+// result when the value appears as "0s" (trailing-s suffix form).
+func TestCheckSSHInt_LoginGraceTime_ZeroWithSuffix(t *testing.T) {
+	b := NewBuilder(WithClock(fixedClock()))
+	cfg := map[string]string{"logingracetime": "0s"}
+	checkSSHInt(b, cfg, "SSH-008", "LoginGraceTime ≤ 60s", "LoginGraceTime",
+		true,
+		func(v int) bool { return v > 0 && v <= 60 },
+		func(v int) string { return fmt.Sprintf("LoginGraceTime = %ds", v) },
+		func(v int) string {
+			return fmt.Sprintf("LoginGraceTime = %ds (should be between 1 and 60 seconds; 0 means unlimited)", v)
+		},
+		"LoginGraceTime not set (default is 120, should be ≤ 60)",
+		SeverityMedium,
+	)
+	r := b.Build()
+	if r.Checks[0].Status != StatusFail {
+		t.Errorf("LoginGraceTime=0s must produce FAIL, got %s", r.Checks[0].Status)
+	}
+}
+
+// TestCheckSSHInt_LoginGraceTime_ZeroIsLessThanOrEqualToSixty documents that
+// the test helper runDirectiveChecks uses the simplified predicate v <= 60
+// (which passes 0), while the production RunSSHChecks uses v > 0 && v <= 60
+// (which fails 0). The two direct tests above verify the production predicate.
+// This test verifies the boundary value 1 passes the production predicate.
+func TestCheckSSHInt_LoginGraceTime_OneIsValid(t *testing.T) {
+	b := NewBuilder(WithClock(fixedClock()))
+	cfg := map[string]string{"logingracetime": "1"}
+	checkSSHInt(b, cfg, "SSH-008", "LoginGraceTime ≤ 60s", "LoginGraceTime",
+		true,
+		func(v int) bool { return v > 0 && v <= 60 },
+		func(v int) string { return fmt.Sprintf("LoginGraceTime = %ds", v) },
+		func(v int) string {
+			return fmt.Sprintf("LoginGraceTime = %ds (should be between 1 and 60 seconds; 0 means unlimited)", v)
+		},
+		"LoginGraceTime not set",
+		SeverityMedium,
+	)
+	r := b.Build()
+	if r.Checks[0].Status != StatusPass {
+		t.Errorf("LoginGraceTime=1 must produce PASS (minimum valid value), got %s", r.Checks[0].Status)
 	}
 }
