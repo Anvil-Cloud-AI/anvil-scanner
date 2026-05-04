@@ -48,17 +48,17 @@ func run(ctx context.Context, args []string) error {
 	fs.SetOutput(os.Stderr)
 
 	showVersion   := fs.Bool("version", false, "Print version and exit")
-	fs.BoolVar(showVersion, "v", false, "")
+	fs.BoolVar(showVersion, "v", false, "Short alias for --version")
 	noAI          := fs.Bool("no-ai", false, "Skip AI risk analysis")
 	doThreatIntel := fs.Bool("threat-intel", false, "Run threat intelligence checks (Shodan, AbuseIPDB, CVE, CISA KEV, local IoC)")
 	noOpenClaw    := fs.Bool("no-openclaw", false, "Skip OpenClaw security audit")
-	jsonOut       := fs.Bool("json", false, "Print JSON report to stdout")
+	jsonOut       := fs.Bool("json", false, "Print JSON report to stdout (HTML report also written unless suppressed by --html)")
 	htmlPath      := fs.String("html", "", "Write HTML report to this path (default: ~/anvil-scanner-reports/)")
-	jsonPath      := fs.String("json-output", "", "Write JSON report to this path")
-	doTelemetry   := fs.Bool("telemetry", false, "Send anonymized scan summary to Anvil telemetry (opt-in)")
+	jsonPath      := fs.String("json-output", "", "Write JSON report to this path (HTML report also written unless suppressed by --html)")
+	doTelemetry   := fs.Bool("telemetry", false, "Send anonymized scan summary to Anvil telemetry (opt-in; also enabled by ANVIL_TELEMETRY=1)")
 	doSchedule    := fs.Bool("schedule", false, "Install hourly scheduled scan (launchd on macOS, crontab on Linux)")
 	doUnschedule  := fs.Bool("unschedule", false, "Remove the scheduled scan job")
-	scheduleDry   := fs.Bool("schedule-dry-run", false, "Show what --schedule would do without making changes")
+	scheduleDry   := fs.Bool("schedule-dry-run", false, "Show what --schedule would install without making changes (implies --schedule)")
 	doRevert       := fs.Bool("revert", false, "Interactively restore files from a backup session")
 	doUninstall    := fs.Bool("uninstall", false, "Restore all backup sessions and remove all anvil-scanner changes")
 	forceUninstall := fs.Bool("force", false, "With --uninstall: proceed even when no backups are found")
@@ -70,7 +70,18 @@ func run(ctx context.Context, args []string) error {
 	doStoreKeyring := fs.Bool("store-keyring", false, "Copy secrets from the container into individual OS keyring entries")
 
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return nil // --help exits 0
+		}
 		return err
+	}
+
+	// Warn about flags that only make sense with a companion flag.
+	if *forceUninstall && !*doUninstall {
+		fmt.Fprintln(os.Stderr, "Warning: --force has no effect without --uninstall")
+	}
+	if *secretsBackend != "" && *encryptSrc == "" && !*doInitSecrets {
+		fmt.Fprintln(os.Stderr, "Warning: --backend has no effect without --init-secrets or --encrypt")
 	}
 
 	if *showVersion {
@@ -82,7 +93,7 @@ func run(ctx context.Context, args []string) error {
 	if *doUnschedule {
 		return schedule.Remove()
 	}
-	if *doSchedule {
+	if *doSchedule || *scheduleDry {
 		bin, err := os.Executable()
 		if err != nil {
 			return fmt.Errorf("resolving binary path: %w", err)
@@ -237,14 +248,14 @@ func run(ctx context.Context, args []string) error {
 			return fmt.Errorf("json marshal: %w", err)
 		}
 		fmt.Println(string(data))
-		return nil
+		// Continue — --json-output and --html may also be set.
 	}
 
 	if *jsonPath != "" {
 		if err := report.WriteJSON(rd, *jsonPath); err != nil {
 			return fmt.Errorf("writing JSON report: %w", err)
 		}
-		fmt.Printf("\nJSON report written to: %s\n", *jsonPath)
+		fmt.Fprintf(progress, "\nJSON report written to: %s\n", *jsonPath)
 	}
 
 	euser := effectiveUser()
