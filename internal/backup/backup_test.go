@@ -11,9 +11,13 @@ import (
 	"time"
 )
 
-func init() {
-	// Allow restoring to temp directories in tests.
-	// On macOS /tmp is a symlink to /private/tmp, so add both.
+// ---- helpers ----------------------------------------------------------------
+
+// allowTempDir scopes extraRestorePrefixesForTest to include the system temp
+// directory for a single test, then clears it on cleanup.
+// On macOS /tmp is a symlink to /private/tmp, so both paths are added.
+func allowTempDir(t *testing.T) {
+	t.Helper()
 	td := os.TempDir()
 	if !strings.HasSuffix(td, "/") {
 		td += "/"
@@ -26,9 +30,8 @@ func init() {
 		prefixes = append(prefixes, real)
 	}
 	extraRestorePrefixesForTest = prefixes
+	t.Cleanup(func() { extraRestorePrefixesForTest = nil })
 }
-
-// ---- helpers ----------------------------------------------------------------
 
 // newManagerInDir creates a Manager whose BackupRoot is inside dir.
 func newManagerInDir(t *testing.T, dir string) *Manager {
@@ -128,6 +131,7 @@ func TestBackup_MissingFile(t *testing.T) {
 // ---- RevertSession restores correctly ---------------------------------------
 
 func TestRevertSession_RestoresCorrectly(t *testing.T) {
+	allowTempDir(t) // restore destination is inside t.TempDir() which lives under /tmp
 	tmp := t.TempDir()
 
 	// Create the original file.
