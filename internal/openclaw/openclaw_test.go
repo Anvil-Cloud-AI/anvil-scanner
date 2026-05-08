@@ -13,6 +13,15 @@ func newBuilder() *scan.CheckBuilder {
 	return scan.NewBuilder()
 }
 
+// useBundledDB pins testCVEDatabaseForTest to the compiled-in database for the
+// duration of a test, ensuring CVE checks are deterministic regardless of
+// network availability or cache state.
+func useBundledDB(t *testing.T) {
+	t.Helper()
+	testCVEDatabaseForTest = openclawGatewayCVEs
+	t.Cleanup(func() { testCVEDatabaseForTest = nil })
+}
+
 // TestRunAudit_SkipWhenBinaryMissing verifies that RunAudit emits exactly one
 // SKIP check when the openclaw binary is not on PATH (guaranteed on CI/dev
 // machines that don't have openclaw installed).
@@ -252,6 +261,7 @@ func TestOcVersionLT(t *testing.T) {
 
 // TestCheckVulns_OldVersion verifies that a very old version gets findings.
 func TestCheckVulns_OldVersion(t *testing.T) {
+	useBundledDB(t)
 	r := CheckVulns("2026.1.1")
 	if len(r.Findings) == 0 {
 		t.Fatal("expected findings for a very old version, got none")
@@ -266,10 +276,10 @@ func TestCheckVulns_OldVersion(t *testing.T) {
 
 // TestCheckVulns_CurrentVersion verifies that a version beyond all known advisories is clean.
 func TestCheckVulns_CurrentVersion(t *testing.T) {
-	// Use a version well beyond all current advisory thresholds.
-	r := CheckVulns("2026.5.5")
+	useBundledDB(t)
+	r := CheckVulns("9999.1.1")
 	if len(r.Findings) != 0 {
-		t.Errorf("expected no findings for future version, got %d: %+v", len(r.Findings), r.Findings)
+		t.Errorf("expected no findings for far-future version, got %d: %+v", len(r.Findings), r.Findings)
 	}
 	if r.Error != "" {
 		t.Errorf("unexpected error: %s", r.Error)
@@ -278,6 +288,7 @@ func TestCheckVulns_CurrentVersion(t *testing.T) {
 
 // TestCheckVulns_April2026Version verifies that 2026.4.16 is flagged by the April advisories.
 func TestCheckVulns_April2026Version(t *testing.T) {
+	useBundledDB(t)
 	r := CheckVulns("2026.4.16")
 	if r.Error != "" {
 		t.Fatalf("unexpected error: %s", r.Error)
@@ -285,6 +296,7 @@ func TestCheckVulns_April2026Version(t *testing.T) {
 	if len(r.Findings) == 0 {
 		t.Fatal("expected findings for 2026.4.16 (April advisories should apply), got none")
 	}
+	// The bundled database has CRITICAL entries patched in 2026.4.22 and 2026.4.25.
 	hasCritical := false
 	for _, f := range r.Findings {
 		if f.Severity == "CRITICAL" {
@@ -299,6 +311,7 @@ func TestCheckVulns_April2026Version(t *testing.T) {
 
 // TestCheckVulns_EmptyVersion verifies that an empty version string produces an error.
 func TestCheckVulns_EmptyVersion(t *testing.T) {
+	useBundledDB(t)
 	r := CheckVulns("")
 	if r.Error == "" {
 		t.Error("expected error for empty version, got none")
@@ -307,6 +320,7 @@ func TestCheckVulns_EmptyVersion(t *testing.T) {
 
 // TestCheckVulns_RawVersionString verifies that version text like "OpenClaw 2026.1.5" is parsed.
 func TestCheckVulns_RawVersionString(t *testing.T) {
+	useBundledDB(t)
 	r := CheckVulns("OpenClaw 2026.1.5")
 	if r.Error != "" {
 		t.Errorf("unexpected error parsing raw version string: %s", r.Error)
@@ -318,6 +332,7 @@ func TestCheckVulns_RawVersionString(t *testing.T) {
 
 // TestCheckVulns_FindingSeverities verifies that critical findings appear in results.
 func TestCheckVulns_FindingSeverities(t *testing.T) {
+	useBundledDB(t)
 	r := CheckVulns("2026.1.1")
 	hasCritical := false
 	for _, f := range r.Findings {
@@ -350,6 +365,7 @@ func TestOcVersionLT_EqualTwoSegment(t *testing.T) {
 // TestCheckVulns_VersionWithPrefix verifies that a version string with a
 // human-readable prefix like "OpenClaw Gateway v2026.1.1" is parsed correctly.
 func TestCheckVulns_VersionWithPrefix(t *testing.T) {
+	useBundledDB(t)
 	r := CheckVulns("OpenClaw Gateway v2026.1.1")
 	if r.Error != "" {
 		t.Fatalf("unexpected error: %s", r.Error)
@@ -362,6 +378,7 @@ func TestCheckVulns_VersionWithPrefix(t *testing.T) {
 // TestCheckVulns_UnparsableVersion verifies that a version string with no
 // numeric portion sets the Error field.
 func TestCheckVulns_UnparsableVersion(t *testing.T) {
+	useBundledDB(t)
 	r := CheckVulns("not-a-version")
 	if r.Error == "" {
 		t.Error("expected Error to be set for unparsable version, got empty string")
