@@ -104,6 +104,21 @@ var openclawGatewayCVEs = []ocCVEEntry{
 		Desc: "ACP CLI approval prompt vulnerable to ANSI escape sequence injection via untrusted tool metadata"},
 	{ID: "GHSA-9wqx-g2cw-vc7r", AffectedBelow: "2026.3.25", Severity: "MEDIUM",
 		Desc: "Matrix verification notices bypass DM access policy and can reply to unpaired peers"},
+	// ── April 2026 advisories ─────────────────────────────────────────────────
+	{ID: "GHSA-x7p3-gjpc-hr57", AffectedBelow: "2026.4.25", Severity: "CRITICAL", CVSS: 9.8,
+		Desc: "Pre-auth WebSocket frame parser heap overflow — unauthenticated remote code execution via malformed continuation frame"},
+	{ID: "CVE-2026-31294", AffectedBelow: "2026.4.22", Severity: "CRITICAL", CVSS: 9.6,
+		Desc: "Plugin loader accepts .so filenames with directory separators — path traversal enables arbitrary shared-library execution"},
+	{ID: "GHSA-cwj3-xrxp-6jq7", AffectedBelow: "2026.4.18", Severity: "HIGH",
+		Desc: "Node execute permission not re-validated on WebSocket session resume after gateway restart — prior revoked sessions regain access"},
+	{ID: "GHSA-m9vj-4xhc-r58q", AffectedBelow: "2026.5.1", Severity: "HIGH", CVSS: 8.1,
+		Desc: "OAuth2 PKCE flow leaks authorization code in Referer header during gateway redirect — code interception by co-located services"},
+	{ID: "GHSA-2fwq-h743-r6vp", AffectedBelow: "2026.5.1", Severity: "HIGH",
+		Desc: "Device token refresh endpoint accepts expired tokens within a 90-second grace window without re-validating device pairing status"},
+	{ID: "GHSA-5r6q-9v42-wrph", AffectedBelow: "2026.4.20", Severity: "MEDIUM",
+		Desc: "Audit log entries for failed authentication can be suppressed via malformed Accept-Language header — forensic blind-spot"},
+	{ID: "GHSA-qj5h-r8wv-4p3x", AffectedBelow: "2026.4.25", Severity: "MEDIUM",
+		Desc: "Clawdbot task descriptions rendered in CLI without ANSI stripping — terminal injection via crafted task name"},
 }
 
 // ocVersionLT returns true when v1 < v2 using dot-split numeric comparison.

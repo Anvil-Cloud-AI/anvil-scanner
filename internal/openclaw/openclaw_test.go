@@ -267,12 +267,33 @@ func TestCheckVulns_OldVersion(t *testing.T) {
 // TestCheckVulns_CurrentVersion verifies that a version beyond all known advisories is clean.
 func TestCheckVulns_CurrentVersion(t *testing.T) {
 	// Use a version well beyond all current advisory thresholds.
-	r := CheckVulns("2026.4.1")
+	r := CheckVulns("2026.5.5")
 	if len(r.Findings) != 0 {
 		t.Errorf("expected no findings for future version, got %d: %+v", len(r.Findings), r.Findings)
 	}
 	if r.Error != "" {
 		t.Errorf("unexpected error: %s", r.Error)
+	}
+}
+
+// TestCheckVulns_April2026Version verifies that 2026.4.16 is flagged by the April advisories.
+func TestCheckVulns_April2026Version(t *testing.T) {
+	r := CheckVulns("2026.4.16")
+	if r.Error != "" {
+		t.Fatalf("unexpected error: %s", r.Error)
+	}
+	if len(r.Findings) == 0 {
+		t.Fatal("expected findings for 2026.4.16 (April advisories should apply), got none")
+	}
+	hasCritical := false
+	for _, f := range r.Findings {
+		if f.Severity == "CRITICAL" {
+			hasCritical = true
+			break
+		}
+	}
+	if !hasCritical {
+		t.Error("expected at least one CRITICAL finding for 2026.4.16")
 	}
 }
 
@@ -344,6 +365,83 @@ func TestCheckVulns_UnparsableVersion(t *testing.T) {
 	r := CheckVulns("not-a-version")
 	if r.Error == "" {
 		t.Error("expected Error to be set for unparsable version, got empty string")
+	}
+}
+
+// TestParseVersionDate verifies YYYY.M.D parsing.
+func TestParseVersionDate(t *testing.T) {
+	cases := []struct {
+		input   string
+		wantOK  bool
+		wantY   int
+		wantM   int
+		wantD   int
+	}{
+		{"2026.4.16", true, 2026, 4, 16},
+		{"2026.12.31", true, 2026, 12, 31},
+		{"v2026.4.16", true, 2026, 4, 16},
+		{"2026.4.16-rc1", true, 2026, 4, 16},
+		{"2026.4.16+g3a1b2c", true, 2026, 4, 16},
+		{"2026.4", false, 0, 0, 0},
+		{"not-a-version", false, 0, 0, 0},
+		{"", false, 0, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got, ok := parseVersionDate(tc.input)
+			if ok != tc.wantOK {
+				t.Fatalf("parseVersionDate(%q) ok = %v, want %v", tc.input, ok, tc.wantOK)
+			}
+			if ok {
+				if got.Year() != tc.wantY || int(got.Month()) != tc.wantM || got.Day() != tc.wantD {
+					t.Errorf("parseVersionDate(%q) = %v, want %d-%d-%d", tc.input, got, tc.wantY, tc.wantM, tc.wantD)
+				}
+			}
+		})
+	}
+}
+
+// TestAddVersionCheck_OldVersionFails verifies that a >90-day-old version gets FAIL.
+func TestAddVersionCheck_OldVersionFails(t *testing.T) {
+	b := newBuilder()
+	install := InstallInfo{Version: "2025.1.1", Channel: "brew"}
+	addVersionCheck(b, install)
+	r := b.Build()
+	if len(r.Checks) != 1 {
+		t.Fatalf("expected 1 check, got %d", len(r.Checks))
+	}
+	c := r.Checks[0]
+	if c.ID != versionCheckID {
+		t.Errorf("check ID = %q, want %q", c.ID, versionCheckID)
+	}
+	if c.Status != scan.StatusFail {
+		t.Errorf("Status = %q, want FAIL for very old version", c.Status)
+	}
+}
+
+// TestAddVersionCheck_RecentVersionPasses verifies that a fresh version gets PASS.
+func TestAddVersionCheck_RecentVersionPasses(t *testing.T) {
+	b := newBuilder()
+	// Use a version one day in the future to guarantee it's always "fresh".
+	import_time := "2099.1.1"
+	install := InstallInfo{Version: import_time, Channel: "npm"}
+	addVersionCheck(b, install)
+	r := b.Build()
+	c := r.Checks[0]
+	if c.Status != scan.StatusPass {
+		t.Errorf("Status = %q, want PASS for future version", c.Status)
+	}
+}
+
+// TestAddVersionCheck_UnparsableVersionSkips verifies that a non-date version gets SKIP.
+func TestAddVersionCheck_UnparsableVersionSkips(t *testing.T) {
+	b := newBuilder()
+	install := InstallInfo{Version: "nightly", Channel: "source"}
+	addVersionCheck(b, install)
+	r := b.Build()
+	c := r.Checks[0]
+	if c.Status != scan.StatusSkip {
+		t.Errorf("Status = %q, want SKIP for unparsable version", c.Status)
 	}
 }
 

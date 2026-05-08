@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,15 @@ const (
 
 	skipID   = "OC-AUDIT-000"
 	skipName = "OpenClaw security audit"
+
+	versionCheckID   = "OC-VERSION-001"
+	versionCheckName = "OpenClaw version freshness"
+
+	// versionWarnAgeDays is how old an install must be (in days) before WARN.
+	// versionFailAgeDays triggers FAIL — at this age security rule coverage
+	// is likely to have meaningful gaps.
+	versionWarnAgeDays = 30
+	versionFailAgeDays = 90
 )
 
 // Path fragments that identify each install channel. Matching is done on a
@@ -251,6 +261,74 @@ func addSkip(b *scan.CheckBuilder, detail string, install InstallInfo) {
 	b.WithRemediation("Source: " + install.sourceTag())
 }
 
+// parseVersionDate parses OpenClaw's YYYY.M.D date-based version string.
+// Returns the zero time and false when the string doesn't match the pattern.
+func parseVersionDate(version string) (time.Time, bool) {
+	v := strings.TrimPrefix(version, "v")
+	// Strip any pre-release suffix (e.g. "2026.4.16-rc1" → "2026.4.16").
+	if idx := strings.IndexAny(v, "-+"); idx != -1 {
+		v = v[:idx]
+	}
+	parts := strings.Split(v, ".")
+	if len(parts) < 3 {
+		return time.Time{}, false
+	}
+	year, e1 := strconv.Atoi(parts[0])
+	month, e2 := strconv.Atoi(parts[1])
+	day, e3 := strconv.Atoi(parts[2])
+	if e1 != nil || e2 != nil || e3 != nil {
+		return time.Time{}, false
+	}
+	if year < 2020 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+	return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC), true
+}
+
+// addVersionCheck adds OC-VERSION-001 based on how old install.Version is.
+// OpenClaw uses YYYY.M.D versioning so we can assess freshness without an
+// external feed. Called whenever the binary is present, independently of
+// whether the audit subprocess succeeds.
+func addVersionCheck(b *scan.CheckBuilder, install InstallInfo) {
+	stamp := "Source: " + install.sourceTag()
+
+	vd, ok := parseVersionDate(install.Version)
+	if !ok {
+		b.Skip(versionCheckID, versionCheckName,
+			fmt.Sprintf("version %q is not in YYYY.M.D format; cannot assess freshness", install.Version),
+			scan.SeverityLow)
+		b.WithRemediation(stamp)
+		return
+	}
+
+	ageDays := int(time.Since(vd).Hours() / 24)
+	upgradeCmd := upgradeCommands[install.Channel]
+	if upgradeCmd == "" {
+		upgradeCmd = upgradeCommands["unknown"]
+	}
+
+	switch {
+	case ageDays >= versionFailAgeDays:
+		b.Fail(versionCheckID, versionCheckName,
+			fmt.Sprintf("OpenClaw %s is %d days old (threshold: %d days). "+
+				"Security rule coverage likely has gaps; upgrade with: %s",
+				install.Version, ageDays, versionFailAgeDays, upgradeCmd),
+			scan.SeverityHigh)
+	case ageDays >= versionWarnAgeDays:
+		b.Warn(versionCheckID, versionCheckName,
+			fmt.Sprintf("OpenClaw %s is %d days old (threshold: %d days). "+
+				"Consider upgrading with: %s",
+				install.Version, ageDays, versionWarnAgeDays, upgradeCmd),
+			scan.SeverityMedium)
+	default:
+		b.Pass(versionCheckID, versionCheckName,
+			fmt.Sprintf("OpenClaw %s is %d day(s) old (within %d-day freshness window)",
+				install.Version, ageDays, versionWarnAgeDays),
+			scan.SeverityLow)
+	}
+	b.WithRemediation(stamp)
+}
+
 // RunAudit runs `openclaw security audit --json` and translates findings into
 // checks on b. If the binary is missing, times out, fails, or emits unexpected
 // output, exactly one SKIP check is added so the broader scan can continue.
@@ -268,6 +346,10 @@ func RunAudit(b *scan.CheckBuilder) {
 			install)
 		return
 	}
+
+	// Version freshness check — runs independently of the audit subprocess so
+	// a stale install is always flagged even when the audit itself is healthy.
+	addVersionCheck(b, install)
 
 	ctx, cancel := context.WithTimeout(context.Background(), auditTimeout)
 	defer cancel()
