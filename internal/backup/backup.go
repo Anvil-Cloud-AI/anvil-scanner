@@ -27,6 +27,10 @@ import (
 // Overridden by tests via overrideBackupRoot.
 var backupRootFn = defaultBackupRoot
 
+// extraRestorePrefixesForTest is appended to allowedRestorePrefixes only in
+// tests. Never set this in production code.
+var extraRestorePrefixesForTest []string
+
 func defaultBackupRoot() (string, error) {
 	h, err := os.UserHomeDir()
 	if err != nil {
@@ -249,7 +253,7 @@ func RevertSession(sessionDir string) (restored, failed int, err error) {
 		resolvedSession = absSession
 	}
 
-	allowedRestorePrefixes := []string{
+	allowedRestorePrefixes := append([]string{
 		"/etc/",
 		"/Library/",
 		"/private/etc/",
@@ -260,7 +264,7 @@ func RevertSession(sessionDir string) (restored, failed int, err error) {
 		"/root/",
 		"/boot/",
 		"/boot/firmware/",
-	}
+	}, extraRestorePrefixesForTest...)
 
 	for _, entry := range data.Backups {
 		src := entry.Backup

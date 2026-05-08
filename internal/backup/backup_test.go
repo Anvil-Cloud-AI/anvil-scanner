@@ -11,6 +11,23 @@ import (
 	"time"
 )
 
+func init() {
+	// Allow restoring to temp directories in tests.
+	// On macOS /tmp is a symlink to /private/tmp, so add both.
+	td := os.TempDir()
+	if !strings.HasSuffix(td, "/") {
+		td += "/"
+	}
+	prefixes := []string{td}
+	if real, err := filepath.EvalSymlinks(td); err == nil && real != td {
+		if !strings.HasSuffix(real, "/") {
+			real += "/"
+		}
+		prefixes = append(prefixes, real)
+	}
+	extraRestorePrefixesForTest = prefixes
+}
+
 // ---- helpers ----------------------------------------------------------------
 
 // newManagerInDir creates a Manager whose BackupRoot is inside dir.
