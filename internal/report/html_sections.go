@@ -317,11 +317,16 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 	}
 
 	if len(r.Findings) == 0 {
+		dbMeta := fmt.Sprintf("%d advisories checked · database: %s", r.Checked, r.DBSource)
+		if r.DBUpdated != "" {
+			dbMeta += " · updated " + r.DBUpdated
+		}
 		return fmt.Sprintf(
 			`    <section><h2>🛡️ OpenClaw Known Vulnerabilities — %s</h2>`+
-				`<p style="color:#16a34a;">✅ No known vulnerabilities — %d advisories checked (bundled database)</p>`+
+				`<p style="color:#16a34a;">✅ No known vulnerabilities</p>`+
+				`<p style="color:#94a3b8;font-size:.85rem;">%s</p>`+
 				`</section>`,
-			e(r.Version), r.Checked,
+			e(r.Version), e(dbMeta),
 		)
 	}
 
@@ -387,9 +392,15 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 			`<div class="wbox">⚠️ <strong>%s vulnerabilities — upgrade OpenClaw to the latest available version</strong></div>`+
 			`<table><tr><th style="width:220px;">Advisory</th><th style="width:90px;">Severity</th>`+
 			`<th style="width:80px;">CVSS</th><th>Description</th></tr>%s</table>`+
-			`<p class="mut">Checked against %d advisories (bundled database)</p>`+
+			`<p class="mut">Checked against %d advisories · database: %s%s</p>`+
 			`</section>`,
-		e(r.Version), e(summary), rows, r.Checked,
+		e(r.Version), e(summary), rows, r.Checked, e(r.DBSource),
+		func() string {
+			if r.DBUpdated != "" {
+				return " · updated " + r.DBUpdated
+			}
+			return ""
+		}(),
 	)
 }
 

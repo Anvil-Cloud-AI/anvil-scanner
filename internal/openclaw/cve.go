@@ -3,9 +3,31 @@
 package openclaw
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+)
+
+// cveFeedURL is the canonical live advisory database.
+// It is a raw file in the public repo, updated whenever new advisories land.
+const cveFeedURL = "https://raw.githubusercontent.com/Anvil-Cloud-AI/anvil-scanner/main/security/openclaw-cves.json"
+
+// cveBundledUpdated is the date the compiled-in database was last refreshed.
+// Used only when neither live fetch nor on-disk cache is available.
+const cveBundledUpdated = "2026-05-08"
+
+const (
+	cveCacheFile   = "cve-cache.json"
+	cveCacheMaxAge = 24 * time.Hour
+	cveFetchTimeout = 10 * time.Second
+	cveFetchMaxBody = 1 << 19 // 512 KiB
 )
 
 // OCVulnFinding is a single advisory match against the installed openclaw-gateway version.
@@ -19,25 +41,44 @@ type OCVulnFinding struct {
 
 // OCVulnResult is the output of the bundled-database vulnerability check.
 type OCVulnResult struct {
-	Version  string
-	Findings []OCVulnFinding
-	Checked  int    // total entries compared
-	Error    string // non-empty when the check could not run
+	Version   string
+	Findings  []OCVulnFinding
+	Checked   int    // total entries compared
+	Error     string // non-empty when the check could not run
+	DBSource  string // "live", "cached (Xh ago)", "bundled (compile-time)"
+	DBUpdated string // "updated" field from the feed, e.g. "2026-05-08"
 }
 
 // ocVersionRE extracts the first dotted-numeric version string from raw output.
 var ocVersionRE = regexp.MustCompile(`(\d+\.\d+(?:\.\d+)*)`)
 
+// feedEntry is the JSON wire format for a single advisory.
+type feedEntry struct {
+	ID            string  `json:"id"`
+	AffectedBelow string  `json:"affectedBelow"`
+	Severity      string  `json:"severity"`
+	CVSS          float64 `json:"cvss"`
+	Desc          string  `json:"desc"`
+}
+
+// feedPayload is the top-level JSON structure of the live feed and the cache file.
+type feedPayload struct {
+	Updated   string      `json:"updated"`             // YYYY-MM-DD from the feed
+	Entries   []feedEntry `json:"entries"`
+	FetchedAt string      `json:"fetchedAt,omitempty"` // RFC3339, written only by the cache
+}
+
+// ocCVEEntry is the internal representation used by ocVersionLT / CheckVulns.
 type ocCVEEntry struct {
 	ID            string
 	AffectedBelow string
 	Severity      string
-	CVSS          float64 // 0 when not published
+	CVSS          float64
 	Desc          string
 }
 
-// openclawGatewayCVEs is the bundled advisory database for openclaw-gateway,
-// ported from python/anvil_scanner/scanner.py OPENCLAW_CVES["openclaw-gateway"].
+// openclawGatewayCVEs is the compiled-in fallback database used when both the
+// live fetch and the on-disk cache are unavailable.
 var openclawGatewayCVEs = []ocCVEEntry{
 	// ── CRITICAL ──────────────────────────────────────────────────────────────
 	{ID: "CVE-2026-22172", AffectedBelow: "2026.3.12", Severity: "CRITICAL", CVSS: 10.0,
@@ -62,6 +103,10 @@ var openclawGatewayCVEs = []ocCVEEntry{
 		Desc: "Silent shared-auth reconnect widens paired device scope from operator.read to operator.admin — can reach node RCE"},
 	{ID: "GHSA-hc5h-pmr3-3497", AffectedBelow: "2026.3.28", Severity: "CRITICAL",
 		Desc: "/pair approve command path omitted caller scope subsetting — reopened pairing escalation"},
+	{ID: "GHSA-x7p3-gjpc-hr57", AffectedBelow: "2026.4.25", Severity: "CRITICAL", CVSS: 9.8,
+		Desc: "Pre-auth WebSocket frame parser heap overflow — unauthenticated remote code execution via malformed continuation frame"},
+	{ID: "CVE-2026-31294", AffectedBelow: "2026.4.22", Severity: "CRITICAL", CVSS: 9.6,
+		Desc: "Plugin loader accepts .so filenames with directory separators — path traversal enables arbitrary shared-library execution"},
 	// ── HIGH ──────────────────────────────────────────────────────────────────
 	{ID: "CVE-2026-25593", AffectedBelow: "2026.1.20", Severity: "HIGH", CVSS: 8.4,
 		Desc: "Unauthenticated Local RCE via WebSocket config.apply (CVE-2026-25593)"},
@@ -93,6 +138,12 @@ var openclawGatewayCVEs = []ocCVEEntry{
 		Desc: "Symlink traversal via IDENTITY.md appendFile (incomplete fix for CVE-2026-32013)"},
 	{ID: "GHSA-vvjh-f6p9-5vcf", AffectedBelow: "2026.2.22", Severity: "HIGH", CVSS: 7.4,
 		Desc: "ZDI-CAN-29311: OpenClaw Canvas Authentication Bypass via IP-matching fallback"},
+	{ID: "GHSA-cwj3-xrxp-6jq7", AffectedBelow: "2026.4.18", Severity: "HIGH",
+		Desc: "Node execute permission not re-validated on WebSocket session resume after gateway restart — prior revoked sessions regain access"},
+	{ID: "GHSA-m9vj-4xhc-r58q", AffectedBelow: "2026.5.1", Severity: "HIGH", CVSS: 8.1,
+		Desc: "OAuth2 PKCE flow leaks authorization code in Referer header during gateway redirect — code interception by co-located services"},
+	{ID: "GHSA-2fwq-h743-r6vp", AffectedBelow: "2026.5.1", Severity: "HIGH",
+		Desc: "Device token refresh endpoint accepts expired tokens within a 90-second grace window without re-validating device pairing status"},
 	// ── MEDIUM ────────────────────────────────────────────────────────────────
 	{ID: "GHSA-68f8-9mhj-h2mp", AffectedBelow: "2026.3.24", Severity: "MEDIUM",
 		Desc: "HTTP /v1/models route bypasses operator.read scope — any bearer token can enumerate models"},
@@ -104,21 +155,160 @@ var openclawGatewayCVEs = []ocCVEEntry{
 		Desc: "ACP CLI approval prompt vulnerable to ANSI escape sequence injection via untrusted tool metadata"},
 	{ID: "GHSA-9wqx-g2cw-vc7r", AffectedBelow: "2026.3.25", Severity: "MEDIUM",
 		Desc: "Matrix verification notices bypass DM access policy and can reply to unpaired peers"},
-	// ── April 2026 advisories ─────────────────────────────────────────────────
-	{ID: "GHSA-x7p3-gjpc-hr57", AffectedBelow: "2026.4.25", Severity: "CRITICAL", CVSS: 9.8,
-		Desc: "Pre-auth WebSocket frame parser heap overflow — unauthenticated remote code execution via malformed continuation frame"},
-	{ID: "CVE-2026-31294", AffectedBelow: "2026.4.22", Severity: "CRITICAL", CVSS: 9.6,
-		Desc: "Plugin loader accepts .so filenames with directory separators — path traversal enables arbitrary shared-library execution"},
-	{ID: "GHSA-cwj3-xrxp-6jq7", AffectedBelow: "2026.4.18", Severity: "HIGH",
-		Desc: "Node execute permission not re-validated on WebSocket session resume after gateway restart — prior revoked sessions regain access"},
-	{ID: "GHSA-m9vj-4xhc-r58q", AffectedBelow: "2026.5.1", Severity: "HIGH", CVSS: 8.1,
-		Desc: "OAuth2 PKCE flow leaks authorization code in Referer header during gateway redirect — code interception by co-located services"},
-	{ID: "GHSA-2fwq-h743-r6vp", AffectedBelow: "2026.5.1", Severity: "HIGH",
-		Desc: "Device token refresh endpoint accepts expired tokens within a 90-second grace window without re-validating device pairing status"},
 	{ID: "GHSA-5r6q-9v42-wrph", AffectedBelow: "2026.4.20", Severity: "MEDIUM",
 		Desc: "Audit log entries for failed authentication can be suppressed via malformed Accept-Language header — forensic blind-spot"},
 	{ID: "GHSA-qj5h-r8wv-4p3x", AffectedBelow: "2026.4.25", Severity: "MEDIUM",
 		Desc: "Clawdbot task descriptions rendered in CLI without ANSI stripping — terminal injection via crafted task name"},
+}
+
+// cveCachePath returns the path to the on-disk cache file, or an error if the
+// home directory cannot be determined.
+func cveCachePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".anvil-scanner", cveCacheFile), nil
+}
+
+// cveFetchClient is the HTTP client used to pull the live feed.
+// Hardcoded to reach github.com only; no user-supplied URL is involved.
+var cveFetchClient = &http.Client{
+	Timeout: cveFetchTimeout,
+	Transport: &http.Transport{
+		TLSHandshakeTimeout: 5 * time.Second,
+		DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+	},
+}
+
+// fetchCVEFeed downloads the live advisory feed and returns the parsed payload.
+func fetchCVEFeed() (*feedPayload, error) {
+	req, err := http.NewRequest(http.MethodGet, cveFeedURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "anvil-scanner/1.0")
+
+	resp, err := cveFetchClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("feed returned HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, cveFetchMaxBody))
+	if err != nil {
+		return nil, err
+	}
+
+	var p feedPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		return nil, err
+	}
+	if len(p.Entries) == 0 {
+		return nil, fmt.Errorf("feed contained no entries")
+	}
+	return &p, nil
+}
+
+// loadCVECache reads the on-disk cache. Returns the payload, its age, and any
+// error (e.g. file missing, parse failure).
+func loadCVECache() (*feedPayload, time.Duration, error) {
+	path, err := cveCachePath()
+	if err != nil {
+		return nil, 0, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	var p feedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, 0, err
+	}
+	if p.FetchedAt == "" {
+		return nil, 0, fmt.Errorf("cache has no fetchedAt timestamp")
+	}
+	fetched, err := time.Parse(time.RFC3339, p.FetchedAt)
+	if err != nil {
+		return nil, 0, err
+	}
+	return &p, time.Since(fetched), nil
+}
+
+// saveCVECache writes the payload to the on-disk cache, stamping FetchedAt.
+// Errors are silently ignored — a failed cache write is non-fatal.
+func saveCVECache(p *feedPayload) error {
+	path, err := cveCachePath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	p.FetchedAt = time.Now().UTC().Format(time.RFC3339)
+	raw, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600)
+}
+
+// feedToInternal converts the JSON wire format to the internal representation.
+func feedToInternal(entries []feedEntry) []ocCVEEntry {
+	out := make([]ocCVEEntry, len(entries))
+	for i, e := range entries {
+		out[i] = ocCVEEntry{
+			ID:            e.ID,
+			AffectedBelow: e.AffectedBelow,
+			Severity:      e.Severity,
+			CVSS:          e.CVSS,
+			Desc:          e.Desc,
+		}
+	}
+	return out
+}
+
+// formatCacheAge converts a duration to a human-readable "Xh ago" string.
+func formatCacheAge(d time.Duration) string {
+	h := int(d.Hours())
+	if h < 1 {
+		return "< 1h"
+	}
+	return fmt.Sprintf("%dh", h)
+}
+
+// loadCVEDatabase returns the best-available CVE entry list and metadata about
+// where the data came from. Precedence:
+//
+//  1. On-disk cache, if < 24 h old  (no network call)
+//  2. Live fetch from GitHub, saved to cache
+//  3. Stale on-disk cache (network unavailable)
+//  4. Compiled-in bundled database
+func loadCVEDatabase() (entries []ocCVEEntry, source, updated string) {
+	// Fast path: fresh cache avoids a network call on most runs.
+	if p, age, err := loadCVECache(); err == nil && age < cveCacheMaxAge {
+		src := fmt.Sprintf("cached (%s old)", formatCacheAge(age))
+		return feedToInternal(p.Entries), src, p.Updated
+	}
+
+	// Cache stale or missing — try live feed.
+	if p, err := fetchCVEFeed(); err == nil {
+		_ = saveCVECache(p)
+		return feedToInternal(p.Entries), "live", p.Updated
+	}
+
+	// Live fetch failed — use stale cache if present.
+	if p, age, err := loadCVECache(); err == nil {
+		src := fmt.Sprintf("cached (stale, %s old)", formatCacheAge(age))
+		return feedToInternal(p.Entries), src, p.Updated
+	}
+
+	// Last resort: compiled-in database.
+	return openclawGatewayCVEs, "bundled (compile-time)", cveBundledUpdated
 }
 
 // ocVersionLT returns true when v1 < v2 using dot-split numeric comparison.
@@ -156,14 +346,11 @@ func ocVersionLT(v1, v2 string) bool {
 	return false
 }
 
-// CheckVulns checks version against the bundled CVE database and returns
+// CheckVulns checks version against the live-or-cached CVE database and returns
 // all advisories that apply. version is the raw string from openclaw --version;
 // the numeric portion is extracted automatically.
 func CheckVulns(version string) OCVulnResult {
-	result := OCVulnResult{
-		Version: version,
-		Checked: len(openclawGatewayCVEs),
-	}
+	result := OCVulnResult{Version: version}
 
 	if version == "" {
 		result.Error = "OpenClaw version unavailable — cannot check vulnerabilities"
@@ -177,7 +364,12 @@ func CheckVulns(version string) OCVulnResult {
 	}
 	ver := m[1]
 
-	for _, entry := range openclawGatewayCVEs {
+	entries, source, updated := loadCVEDatabase()
+	result.Checked = len(entries)
+	result.DBSource = source
+	result.DBUpdated = updated
+
+	for _, entry := range entries {
 		if ocVersionLT(ver, entry.AffectedBelow) {
 			result.Findings = append(result.Findings, OCVulnFinding{
 				ID:            entry.ID,
@@ -193,7 +385,7 @@ func CheckVulns(version string) OCVulnResult {
 }
 
 // RunVulnCheck detects the installed OpenClaw version and checks it against
-// the bundled advisory database. Returns nil when openclaw is not found on PATH.
+// the live-or-cached advisory database. Returns nil when openclaw is not found on PATH.
 func RunVulnCheck() *OCVulnResult {
 	install := DetectInstall()
 	if install.Version == "" {

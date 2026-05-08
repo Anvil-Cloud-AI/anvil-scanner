@@ -1,0 +1,271 @@
+{
+  "updated": "2026-05-08",
+  "entries": [
+    {
+      "id": "CVE-2026-22172",
+      "affectedBelow": "2026.3.12",
+      "severity": "CRITICAL",
+      "cvss": 10.0,
+      "desc": "WebSocket shared-auth connections could self-declare elevated scopes (CVE-2026-22172)"
+    },
+    {
+      "id": "GHSA-4jpw-hj22-2xmc",
+      "affectedBelow": "2026.3.11",
+      "severity": "CRITICAL",
+      "cvss": 10.0,
+      "desc": "Pairing-scoped device tokens could mint operator.admin and reach Node RCE"
+    },
+    {
+      "id": "GHSA-8rh7-6779-cjqq",
+      "affectedBelow": "2026.3.28",
+      "severity": "CRITICAL",
+      "cvss": 9.7,
+      "desc": "CWD .env injection bypasses host-env policy and allows config takeover"
+    },
+    {
+      "id": "GHSA-j7p2-qcwm-94v4",
+      "affectedBelow": "2026.3.22",
+      "severity": "CRITICAL",
+      "cvss": 9.7,
+      "desc": "Incomplete host env sanitization blocklist — supply-chain redirection via package-manager env overrides"
+    },
+    {
+      "id": "CVE-2026-28466",
+      "affectedBelow": "2026.2.14",
+      "severity": "CRITICAL",
+      "cvss": 9.4,
+      "desc": "RCE via Node Invoke Approval Bypass in Gateway (CVE-2026-28466)"
+    },
+    {
+      "id": "GHSA-hf68-49fm-59cq",
+      "affectedBelow": "2026.3.22",
+      "severity": "CRITICAL",
+      "cvss": 9.4,
+      "desc": "device.pair.approve: operator.pairing escalates to operator.admin → Node RCE"
+    },
+    {
+      "id": "GHSA-4rj2-gpmh-qq5x",
+      "affectedBelow": "2026.2.2",
+      "severity": "CRITICAL",
+      "cvss": 9.4,
+      "desc": "Inbound allowlist policy bypass in voice-call extension (empty caller ID + suffix matching)"
+    },
+    {
+      "id": "GHSA-qrq5-wjgg-rvqw",
+      "affectedBelow": "2026.2.1",
+      "severity": "CRITICAL",
+      "cvss": 9.3,
+      "desc": "Path Traversal in Plugin Installation"
+    },
+    {
+      "id": "GHSA-9hjh-fr4f-gxc4",
+      "affectedBelow": "2026.3.25",
+      "severity": "CRITICAL",
+      "cvss": 9.3,
+      "desc": "Non-admin operator can self-claim operator.admin via backend reconnect scope bypass"
+    },
+    {
+      "id": "GHSA-fqw4-mph7-2vr8",
+      "affectedBelow": "2026.3.25",
+      "severity": "CRITICAL",
+      "cvss": 9.4,
+      "desc": "Silent shared-auth reconnect widens paired device scope from operator.read to operator.admin — can reach node RCE"
+    },
+    {
+      "id": "GHSA-hc5h-pmr3-3497",
+      "affectedBelow": "2026.3.28",
+      "severity": "CRITICAL",
+      "cvss": 0,
+      "desc": "/pair approve command path omitted caller scope subsetting — reopened pairing escalation"
+    },
+    {
+      "id": "GHSA-x7p3-gjpc-hr57",
+      "affectedBelow": "2026.4.25",
+      "severity": "CRITICAL",
+      "cvss": 9.8,
+      "desc": "Pre-auth WebSocket frame parser heap overflow — unauthenticated remote code execution via malformed continuation frame"
+    },
+    {
+      "id": "CVE-2026-31294",
+      "affectedBelow": "2026.4.22",
+      "severity": "CRITICAL",
+      "cvss": 9.6,
+      "desc": "Plugin loader accepts .so filenames with directory separators — path traversal enables arbitrary shared-library execution"
+    },
+    {
+      "id": "CVE-2026-25593",
+      "affectedBelow": "2026.1.20",
+      "severity": "HIGH",
+      "cvss": 8.4,
+      "desc": "Unauthenticated Local RCE via WebSocket config.apply (CVE-2026-25593)"
+    },
+    {
+      "id": "CVE-2026-24763",
+      "affectedBelow": "2026.1.29",
+      "severity": "HIGH",
+      "cvss": 8.8,
+      "desc": "Command Injection in Clawdbot Docker Execution via PATH environment variable (CVE-2026-24763)"
+    },
+    {
+      "id": "CVE-2026-25157",
+      "affectedBelow": "2026.1.29",
+      "severity": "HIGH",
+      "cvss": 7.8,
+      "desc": "OS Command Injection via Project Root Path in sshNodeCommand (macOS) (CVE-2026-25157)"
+    },
+    {
+      "id": "GHSA-g8p2-7wf7-98mq",
+      "affectedBelow": "2026.2.1",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "1-Click RCE via Authentication Token Exfiltration from gatewayUrl"
+    },
+    {
+      "id": "GHSA-3cw3-5vxw-g2h3",
+      "affectedBelow": "2026.3.29",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "CLI Remote Onboarding persists unauthenticated discovery endpoint and exfiltrates gateway credentials"
+    },
+    {
+      "id": "GHSA-f44p-c7w9-7xr7",
+      "affectedBelow": "2026.3.29",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "Gateway WebSocket denial of service via unbounded pre-auth upgrades"
+    },
+    {
+      "id": "GHSA-2pr2-hcv6-7gwv",
+      "affectedBelow": "2026.3.29",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "Device removal and token revocation do not terminate active WebSocket sessions"
+    },
+    {
+      "id": "GHSA-h4jx-hjr3-fhgc",
+      "affectedBelow": "2026.3.25",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "Plugin subagent fallback deleteSession uses synthetic operator.admin scope instead of caller scope"
+    },
+    {
+      "id": "GHSA-9p93-7j67-5pc2",
+      "affectedBelow": "2026.3.25",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "HTTP /sessions/:sessionKey/kill reaches admin kill path without validating caller scope"
+    },
+    {
+      "id": "GHSA-qm2m-28pf-hgjw",
+      "affectedBelow": "2026.3.25",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "Gateway plugin HTTP auth mints operator.admin runtime scope for all callers regardless of actual permissions"
+    },
+    {
+      "id": "GHSA-94pw-c6m8-p9p9",
+      "affectedBelow": "2026.3.24",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "operator.write scope can modify admin-class channel allowlist configuration via chat.send"
+    },
+    {
+      "id": "GHSA-rhfg-j8jq-7v2h",
+      "affectedBelow": "2026.3.25",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "SSRF via unguarded configured base URLs in multiple channel extensions (incomplete fix for CVE-2026-28476)"
+    },
+    {
+      "id": "GHSA-56pc-6hvp-4gv4",
+      "affectedBelow": "2026.2.22",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "Arbitrary file read via $include directive"
+    },
+    {
+      "id": "GHSA-7xr2-q9vf-x4r5",
+      "affectedBelow": "2026.3.25",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "Symlink traversal via IDENTITY.md appendFile (incomplete fix for CVE-2026-32013)"
+    },
+    {
+      "id": "GHSA-vvjh-f6p9-5vcf",
+      "affectedBelow": "2026.2.22",
+      "severity": "HIGH",
+      "cvss": 7.4,
+      "desc": "ZDI-CAN-29311: OpenClaw Canvas Authentication Bypass via IP-matching fallback"
+    },
+    {
+      "id": "GHSA-cwj3-xrxp-6jq7",
+      "affectedBelow": "2026.4.18",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "Node execute permission not re-validated on WebSocket session resume after gateway restart — prior revoked sessions regain access"
+    },
+    {
+      "id": "GHSA-m9vj-4xhc-r58q",
+      "affectedBelow": "2026.5.1",
+      "severity": "HIGH",
+      "cvss": 8.1,
+      "desc": "OAuth2 PKCE flow leaks authorization code in Referer header during gateway redirect — code interception by co-located services"
+    },
+    {
+      "id": "GHSA-2fwq-h743-r6vp",
+      "affectedBelow": "2026.5.1",
+      "severity": "HIGH",
+      "cvss": 0,
+      "desc": "Device token refresh endpoint accepts expired tokens within a 90-second grace window without re-validating device pairing status"
+    },
+    {
+      "id": "GHSA-68f8-9mhj-h2mp",
+      "affectedBelow": "2026.3.24",
+      "severity": "MEDIUM",
+      "cvss": 0,
+      "desc": "HTTP /v1/models route bypasses operator.read scope — any bearer token can enumerate models"
+    },
+    {
+      "id": "GHSA-5jvj-hxmh-6h6j",
+      "affectedBelow": "2026.3.25",
+      "severity": "MEDIUM",
+      "cvss": 0,
+      "desc": "HTTP session history route bypasses operator.read scope check applied on the WebSocket path"
+    },
+    {
+      "id": "GHSA-3h52-cx59-c456",
+      "affectedBelow": "2026.3.25",
+      "severity": "MEDIUM",
+      "cvss": 0,
+      "desc": "Feishu webhook parses request body before signature validation — DoS via resource exhaustion"
+    },
+    {
+      "id": "GHSA-4hmj-39m8-jwc7",
+      "affectedBelow": "2026.3.25",
+      "severity": "MEDIUM",
+      "cvss": 0,
+      "desc": "ACP CLI approval prompt vulnerable to ANSI escape sequence injection via untrusted tool metadata"
+    },
+    {
+      "id": "GHSA-9wqx-g2cw-vc7r",
+      "affectedBelow": "2026.3.25",
+      "severity": "MEDIUM",
+      "cvss": 0,
+      "desc": "Matrix verification notices bypass DM access policy and can reply to unpaired peers"
+    },
+    {
+      "id": "GHSA-5r6q-9v42-wrph",
+      "affectedBelow": "2026.4.20",
+      "severity": "MEDIUM",
+      "cvss": 0,
+      "desc": "Audit log entries for failed authentication can be suppressed via malformed Accept-Language header — forensic blind-spot"
+    },
+    {
+      "id": "GHSA-qj5h-r8wv-4p3x",
+      "affectedBelow": "2026.4.25",
+      "severity": "MEDIUM",
+      "cvss": 0,
+      "desc": "Clawdbot task descriptions rendered in CLI without ANSI stripping — terminal injection via crafted task name"
+    }
+  ]
+}
