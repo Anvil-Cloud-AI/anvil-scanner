@@ -1,0 +1,29 @@
+# Go
+/anvil-scanner
+/anvil-scanner.exe
+/dist/
+*.test
+*.out
+coverage.txt
+vendor/
+
+# Editor / local
+.claude/
+.DS_Store
+*.log
+
+# Environment + secrets (never commit)
+.env
+*.env
+!*.example.env
+secrets.enc
+secrets.key
+*.key
+*.pem
+
+# Local scan outputs
+anvil-scanner-reports/
+security/reports/
+.secrets-scan/
+scan-working/
+.gitnexus
