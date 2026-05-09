@@ -319,9 +319,14 @@ func loadCVEDatabase() (entries []ocCVEEntry, source, updated string) {
 		return testCVEDatabaseForTest, "test", "test"
 	}
 	// Fast path: fresh cache avoids a network call.
+	// Guard: if the cache has entries but feedToInternal yields none, the cache
+	// was written by an older schema (e.g. affectedBelow vs fixed_version) and
+	// is treated as invalid — fall through to re-fetch.
 	if c, age, err := loadCVECache(); err == nil && age < cveCacheMaxAge {
-		src := fmt.Sprintf("cached (%s old)", formatCacheAge(age))
-		return feedToInternal(c.Entries), src, c.Updated
+		if converted := feedToInternal(c.Entries); len(converted) > 0 {
+			src := fmt.Sprintf("cached (%s old)", formatCacheAge(age))
+			return converted, src, c.Updated
+		}
 	}
 
 	// Cache stale or missing — try live feed.
@@ -330,10 +335,12 @@ func loadCVEDatabase() (entries []ocCVEEntry, source, updated string) {
 		return feedToInternal(c.Entries), "live", c.Updated
 	}
 
-	// Live fetch failed — use stale cache if present.
+	// Live fetch failed — use stale cache if present and usable.
 	if c, age, err := loadCVECache(); err == nil {
-		src := fmt.Sprintf("cached (stale, %s old)", formatCacheAge(age))
-		return feedToInternal(c.Entries), src, c.Updated
+		if converted := feedToInternal(c.Entries); len(converted) > 0 {
+			src := fmt.Sprintf("cached (stale, %s old)", formatCacheAge(age))
+			return converted, src, c.Updated
+		}
 	}
 
 	// Last resort: compiled-in database.
