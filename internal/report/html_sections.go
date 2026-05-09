@@ -316,63 +316,84 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 		)
 	}
 
-	if len(r.Findings) == 0 {
-		dbMeta := fmt.Sprintf("%d advisories checked · database: %s", r.Checked, r.DBSource)
+	dbFooter := func() string {
+		s := fmt.Sprintf("%d advisories checked · source: %s", r.Checked, r.DBSource)
 		if r.DBUpdated != "" {
-			dbMeta += " · updated " + r.DBUpdated
+			s += " · newest advisory: " + r.DBUpdated
 		}
+		return s
+	}
+
+	if len(r.Findings) == 0 {
 		return fmt.Sprintf(
 			`    <section><h2>🛡️ OpenClaw Known Vulnerabilities — %s</h2>`+
 				`<p style="color:#16a34a;">✅ No known vulnerabilities</p>`+
 				`<p style="color:#94a3b8;font-size:.85rem;">%s</p>`+
 				`</section>`,
-			e(r.Version), e(dbMeta),
+			e(r.Version), e(dbFooter()),
 		)
 	}
 
-	critCount, highCount, otherCount := 0, 0, 0
+	critCount, highCount, medCount, lowCount := 0, 0, 0, 0
 	for _, f := range r.Findings {
 		switch f.Severity {
 		case "CRITICAL":
 			critCount++
 		case "HIGH":
 			highCount++
+		case "MEDIUM":
+			medCount++
 		default:
-			otherCount++
+			lowCount++
+		}
+	}
+
+	// Only show the CVSS column when at least one finding has a score.
+	hasCVSS := false
+	for _, f := range r.Findings {
+		if f.CVSS > 0 {
+			hasCVSS = true
+			break
+		}
+	}
+
+	colorFor := func(sev string) string {
+		switch sev {
+		case "CRITICAL":
+			return "#dc2626"
+		case "HIGH":
+			return "#f97316"
+		case "MEDIUM":
+			return "#eab308"
+		default:
+			return "#6b7280"
 		}
 	}
 
 	rows := ""
 	for _, f := range r.Findings {
-		if f.Severity == "MEDIUM" || f.Severity == "LOW" {
-			continue
-		}
-		sc := "#6b7280"
-		switch f.Severity {
-		case "CRITICAL":
-			sc = "#dc2626"
-		case "HIGH":
-			sc = "#f97316"
-		}
+		sc := colorFor(f.Severity)
 		cvssCell := ""
-		if f.CVSS > 0 {
-			cvssCell = fmt.Sprintf("CVSS %.1f", f.CVSS)
+		if hasCVSS {
+			if f.CVSS > 0 {
+				cvssCell = fmt.Sprintf("%.1f", f.CVSS)
+			} else {
+				cvssCell = "—"
+			}
 		}
-		rows += fmt.Sprintf(
-			`<tr><td><code>%s</code></td>`+
-				`<td><span style="color:%s;font-weight:700;white-space:nowrap;">%s</span></td>`+
-				`<td>%s</td>`+
-				`<td style="font-size:.83rem;color:#94a3b8;">%s</td></tr>`,
-			e(f.ID), sc, e(f.Severity), e(cvssCell), e(f.Desc),
-		)
-	}
-	if otherCount > 0 {
-		rows += fmt.Sprintf(
-			`<tr><td colspan="4" style="color:#9ca3af;font-style:italic;padding:.5rem 1rem;">`+
-				`+ %d additional MEDIUM/LOW advisories — upgrade OpenClaw to resolve all`+
-				`</td></tr>`,
-			otherCount,
-		)
+		rowStyle := ""
+		if f.Severity == "MEDIUM" || f.Severity == "LOW" {
+			rowStyle = ` style="opacity:.75;"`
+		}
+		idCell := fmt.Sprintf(`<td><code>%s</code></td>`, e(f.ID))
+		sevCell := fmt.Sprintf(`<td><span style="color:%s;font-weight:700;white-space:nowrap;">%s</span></td>`, sc, e(f.Severity))
+		descCell := fmt.Sprintf(`<td style="font-size:.83rem;">%s</td>`, e(f.Desc))
+		if hasCVSS {
+			rows += fmt.Sprintf(`<tr%s>%s%s<td style="font-size:.83rem;color:#94a3b8;">%s</td>%s</tr>`,
+				rowStyle, idCell, sevCell, e(cvssCell), descCell)
+		} else {
+			rows += fmt.Sprintf(`<tr%s>%s%s%s</tr>`, rowStyle, idCell, sevCell, descCell)
+		}
 	}
 
 	parts := []string{}
@@ -382,25 +403,27 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 	if highCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d HIGH", highCount))
 	}
-	if otherCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d MEDIUM/LOW", otherCount))
+	if medCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d MEDIUM", medCount))
+	}
+	if lowCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d LOW", lowCount))
 	}
 	summary := strings.Join(parts, ", ")
+
+	tableHeader := `<table><tr><th style="width:220px;">Advisory</th><th style="width:90px;">Severity</th>`
+	if hasCVSS {
+		tableHeader += `<th style="width:60px;">CVSS</th>`
+	}
+	tableHeader += `<th>Description</th></tr>`
 
 	return fmt.Sprintf(
 		`    <section><h2>🔴 OpenClaw Known Vulnerabilities — %s</h2>`+
 			`<div class="wbox">⚠️ <strong>%s vulnerabilities — upgrade OpenClaw to the latest available version</strong></div>`+
-			`<table><tr><th style="width:220px;">Advisory</th><th style="width:90px;">Severity</th>`+
-			`<th style="width:80px;">CVSS</th><th>Description</th></tr>%s</table>`+
-			`<p class="mut">Checked against %d advisories · database: %s%s</p>`+
+			`%s%s</table>`+
+			`<p class="mut">%s</p>`+
 			`</section>`,
-		e(r.Version), e(summary), rows, r.Checked, e(r.DBSource),
-		func() string {
-			if r.DBUpdated != "" {
-				return " · updated " + r.DBUpdated
-			}
-			return ""
-		}(),
+		e(r.Version), e(summary), tableHeader, rows, e(dbFooter()),
 	)
 }
 
