@@ -269,7 +269,7 @@ sudo anvil-scanner --uninstall
 
 | Data | Source | License |
 |------|--------|---------|
-| OpenClaw CVE advisory database | [jgamblin/OpenClawCVEs](https://github.com/jgamblin/OpenClawCVEs) (fetched at runtime, updated hourly) | MIT — Copyright 2026 Jerry Gamblin |
+| OpenClaw CVE advisory database | [jgamblin/OpenClawCVEs](https://github.com/jgamblin/OpenClawCVEs) (fetched at runtime, updated hourly) | MIT — Copyright 2026 [Jerry Gamblin](https://github.com/jgamblin) |
 
 ---
 

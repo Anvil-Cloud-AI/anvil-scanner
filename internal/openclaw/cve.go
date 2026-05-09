@@ -15,7 +15,8 @@ import (
 	"time"
 )
 
-// cveFeedURL is the community-maintained OpenClaw advisory database, updated hourly.
+// cveFeedURL is the community-maintained OpenClaw advisory database by Jerry Gamblin
+// (https://github.com/jgamblin), updated hourly. MIT licensed.
 // Schema: ghsa-advisories.json — a flat JSON array of advisory objects.
 const cveFeedURL = "https://raw.githubusercontent.com/jgamblin/OpenClawCVEs/main/ghsa-advisories.json"
 
