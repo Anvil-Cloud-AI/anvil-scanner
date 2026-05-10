@@ -50,7 +50,7 @@ func run(ctx context.Context, args []string) error {
 	showVersion   := fs.Bool("version", false, "Print version and exit")
 	fs.BoolVar(showVersion, "v", false, "Short alias for --version")
 	noAI          := fs.Bool("no-ai", false, "Skip AI risk analysis")
-	doThreatIntel := fs.Bool("threat-intel", false, "Run threat intelligence checks (Shodan, AbuseIPDB, CVE, CISA KEV, local IoC)")
+	noThreatIntel := fs.Bool("no-threat-intel", false, "Skip threat intelligence checks (Shodan, AbuseIPDB, CVE, CISA KEV, local IoC)")
 	noOpenClaw    := fs.Bool("no-openclaw", false, "Skip OpenClaw security audit")
 	jsonOut       := fs.Bool("json", false, "Print JSON report to stdout (HTML report also written unless suppressed by --html)")
 	htmlPath      := fs.String("html", "", "Write HTML report to this path (default: ~/anvil-scanner-reports/)")
@@ -203,9 +203,9 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 
-	// Threat intel (opt-in via --threat-intel)
+	// Threat intel (on by default; skip with --no-threat-intel)
 	var threatResult *threat.Result
-	if *doThreatIntel {
+	if !*noThreatIntel {
 		fmt.Fprintln(progress, "\nRunning threat intelligence scan...")
 		tr := threat.Scan(ctx)
 		threatResult = &tr

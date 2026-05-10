@@ -95,6 +95,15 @@ func CheckLocalIOC() LocalIOCResult {
 		AuthAnomalies:       []string{},
 	}
 
+	// Resolve the scanner's own executable path so it is never self-reported
+	// as a suspicious temp file when invoked from /tmp.
+	selfExe, _ := os.Executable()
+	if selfExe != "" {
+		if resolved, err := filepath.EvalSymlinks(selfExe); err == nil {
+			selfExe = resolved
+		}
+	}
+
 	isLinux := runtime.GOOS == "linux"
 	isMacOS := runtime.GOOS == "darwin"
 
@@ -109,7 +118,7 @@ func CheckLocalIOC() LocalIOCResult {
 	}
 
 	// ── c) Suspicious files in temp dirs ─────────────────────────────────
-	checkTempDirs(&result)
+	checkTempDirs(&result, selfExe)
 
 	// ── d) SSH persistence check ──────────────────────────────────────────
 	checkSSHKeys(&result)
@@ -126,7 +135,7 @@ func CheckLocalIOC() LocalIOCResult {
 
 	// ── i) macOS $TMPDIR executable scan ──────────────────────────────────
 	if isMacOS {
-		checkMacOSTmpdir(&result)
+		checkMacOSTmpdir(&result, selfExe)
 	}
 
 	// ── j) macOS xattr quarantine bypass detection ────────────────────────
@@ -351,7 +360,7 @@ func checkC2Connections(result *LocalIOCResult) {
 	}
 }
 
-func checkTempDirs(result *LocalIOCResult) {
+func checkTempDirs(result *LocalIOCResult, selfExe string) {
 	now := time.Now()
 	dayAgo := now.Add(-24 * time.Hour)
 
@@ -372,6 +381,9 @@ func checkTempDirs(result *LocalIOCResult) {
 				continue
 			}
 			path := filepath.Join(dir, entry.Name())
+			if selfExe != "" && path == selfExe {
+				continue
+			}
 			isExec := info.Mode()&0111 != 0
 			isRecent := info.ModTime().After(dayAgo)
 			ext := filepath.Ext(entry.Name())
@@ -706,7 +718,7 @@ func checkAuthLog(result *LocalIOCResult) {
 	}
 }
 
-func checkMacOSTmpdir(result *LocalIOCResult) {
+func checkMacOSTmpdir(result *LocalIOCResult, selfExe string) {
 	macTmpDir := os.Getenv("TMPDIR")
 	if macTmpDir == "" {
 		return
@@ -729,6 +741,9 @@ func checkMacOSTmpdir(result *LocalIOCResult) {
 			continue
 		}
 		path := filepath.Join(macTmpDir, entry.Name())
+		if selfExe != "" && path == selfExe {
+			continue
+		}
 		isExec := info.Mode()&0111 != 0
 		ext := filepath.Ext(entry.Name())
 

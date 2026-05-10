@@ -119,7 +119,7 @@ Most operations require **sudo** — scanning reads system files (`/etc/ssh/sshd
 | `--scan` (full) | Yes | Reads `/etc/shadow`, `/etc/ssh/sshd_config`, kernel parameters |
 | `--revert` / `--uninstall` | Yes | Restores system files |
 | `--schedule` / `--unschedule` | No | Installs to your user crontab / launchd user agent |
-| `--threat-intel` standalone | No | Network lookups only |
+| Threat intel (default on) | No | Network lookups only |
 
 Running without sudo still produces a partial scan; checks that need root show `SKIP`.
 
@@ -128,11 +128,11 @@ Running without sudo still produces a partial scan; checks that need root show `
 ## Usage
 
 ```bash
-# Full scan — host + OpenClaw + AI analysis (most common)
+# Full scan — host + OpenClaw + threat intelligence + AI analysis (most common)
 sudo anvil-scanner
 
-# Include threat intelligence
-sudo anvil-scanner --threat-intel
+# Skip threat intelligence
+sudo anvil-scanner --no-threat-intel
 
 # Skip AI analysis
 sudo anvil-scanner --no-ai
@@ -184,7 +184,7 @@ sudo anvil-scanner --init-secrets --backend keyring
 
 ## Threat Intelligence
 
-Enable with `--threat-intel`. Results appear in the HTML report's **Threat Intelligence** section and are factored into the AI risk score.
+Runs by default. Disable with `--no-threat-intel`. Results appear in the HTML report's **Threat Intelligence** section and are factored into the AI risk score.
 
 | Check | Source | API key required |
 |-------|--------|-----------------|

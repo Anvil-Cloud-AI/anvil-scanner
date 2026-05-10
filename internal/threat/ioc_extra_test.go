@@ -598,7 +598,7 @@ func TestCheckMacOSTmpdir_RelativeTMPDIR(t *testing.T) {
 	}()
 
 	result := &LocalIOCResult{SuspiciousTempFiles: []string{}}
-	checkMacOSTmpdir(result)
+	checkMacOSTmpdir(result, "")
 
 	if len(result.SuspiciousTempFiles) != 0 {
 		t.Errorf("checkMacOSTmpdir with relative TMPDIR: expected 0 findings, got %d: %v",
@@ -618,7 +618,7 @@ func TestCheckMacOSTmpdir_EmptyTMPDIR(t *testing.T) {
 	}()
 
 	result := &LocalIOCResult{SuspiciousTempFiles: []string{}}
-	checkMacOSTmpdir(result)
+	checkMacOSTmpdir(result, "")
 
 	if len(result.SuspiciousTempFiles) != 0 {
 		t.Errorf("checkMacOSTmpdir with empty TMPDIR: expected 0 findings, got %d",
@@ -644,7 +644,7 @@ func TestCheckMacOSTmpdir_AbsoluteTMPDIR_Proceeds(t *testing.T) {
 
 	result := &LocalIOCResult{SuspiciousTempFiles: []string{}}
 	// Must not panic; empty dir produces no findings.
-	checkMacOSTmpdir(result)
+	checkMacOSTmpdir(result, "")
 	// Zero findings expected — but the key invariant is no panic and no early
 	// exit at the relative-path guard.
 	_ = result
@@ -671,7 +671,7 @@ func TestCheckMacOSTmpdir_AbsoluteTMPDIR_ExecutableDetected(t *testing.T) {
 	}()
 
 	result := &LocalIOCResult{SuspiciousTempFiles: []string{}}
-	checkMacOSTmpdir(result)
+	checkMacOSTmpdir(result, "")
 
 	if len(result.SuspiciousTempFiles) == 0 {
 		t.Error("expected at least one finding for an executable file in TMPDIR, got none")
