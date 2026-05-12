@@ -381,8 +381,14 @@ func checkTempDirs(result *LocalIOCResult, selfExe string) {
 				continue
 			}
 			path := filepath.Join(dir, entry.Name())
-			if selfExe != "" && path == selfExe {
-				continue
+			if selfExe != "" {
+				resolvedPath := path
+				if rp, err := filepath.EvalSymlinks(path); err == nil {
+					resolvedPath = rp
+				}
+				if resolvedPath == selfExe {
+					continue
+				}
 			}
 			isExec := info.Mode()&0111 != 0
 			isRecent := info.ModTime().After(dayAgo)
@@ -741,8 +747,14 @@ func checkMacOSTmpdir(result *LocalIOCResult, selfExe string) {
 			continue
 		}
 		path := filepath.Join(macTmpDir, entry.Name())
-		if selfExe != "" && path == selfExe {
-			continue
+		if selfExe != "" {
+			resolvedPath := path
+			if rp, err := filepath.EvalSymlinks(path); err == nil {
+				resolvedPath = rp
+			}
+			if resolvedPath == selfExe {
+				continue
+			}
 		}
 		isExec := info.Mode()&0111 != 0
 		ext := filepath.Ext(entry.Name())
