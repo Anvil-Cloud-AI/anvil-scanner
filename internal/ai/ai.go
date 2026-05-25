@@ -412,7 +412,11 @@ func callClaude(ctx context.Context, prompt string) (string, error) {
 			} `json:"error"`
 		}
 		if jsonErr := json.Unmarshal(respBody, &apiErr); jsonErr == nil && apiErr.Error.Type != "" {
-			return "", fmt.Errorf("claude API error %d: %s", resp.StatusCode, apiErr.Error.Type)
+			msg := apiErr.Error.Type
+			if apiErr.Error.Message != "" {
+				msg += ": " + apiErr.Error.Message
+			}
+			return "", fmt.Errorf("claude API error %d: %s", resp.StatusCode, msg)
 		}
 		return "", fmt.Errorf("claude API error %d", resp.StatusCode)
 	}

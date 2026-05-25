@@ -160,6 +160,11 @@ func run(ctx context.Context, args []string) error {
 			fmt.Fprintln(os.Stderr, "ℹ  No AI provider available — AI section will be empty.")
 			fmt.Fprintln(os.Stderr, "   • Install Ollama for free local inference, then run: ollama serve")
 			fmt.Fprintln(os.Stderr, "   • Or set CLAUDE_KEY, OPENAI_KEY, or GROK_KEY")
+			if os.Getuid() == 0 && os.Getenv("SUDO_USER") != "" {
+				fmt.Fprintln(os.Stderr, "   ⚠  Running via sudo — shell env vars are stripped by default.")
+				fmt.Fprintln(os.Stderr, "      Use: sudo -E anvil-scanner   (preserves your environment)")
+				fmt.Fprintln(os.Stderr, "      Or store keys permanently: sudo anvil-scanner --init-secrets")
+			}
 			fmt.Fprintln(os.Stderr, "   Continuing scan without AI — the report will flag this prominently.")
 		} else {
 			fmt.Fprintf(progress, "AI analysis will use: %s\n\n", aiProviderName)
