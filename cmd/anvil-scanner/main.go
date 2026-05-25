@@ -22,6 +22,7 @@ import (
 
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/ai"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/backup"
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/hardening"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/openclaw"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/report"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/scan"
@@ -68,6 +69,7 @@ func run(ctx context.Context, args []string) error {
 	rotateBackend  := fs.String("rotate-key-backend", "", "Re-encrypt the secrets container under a new backend (keyring|passphrase|file)")
 	secretsBackend := fs.String("backend", "", "Key backend for --init-secrets / --encrypt (keyring|passphrase|file)")
 	doStoreKeyring := fs.Bool("store-keyring", false, "Copy secrets from the container into individual OS keyring entries")
+	doHarden       := fs.Bool("harden", false, "Apply auto-fixable hardening remediation for failing checks (requires root)")
 
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -180,6 +182,21 @@ func run(ctx context.Context, args []string) error {
 
 	openPorts := scan.GetOpenPorts()
 	pendingUpdates := scan.GetPendingUpdates()
+
+	if *doHarden {
+		if os.Getuid() != 0 {
+			fmt.Fprintln(os.Stderr, "⚠  --harden requires root. Re-run with: sudo anvil-scanner --harden")
+		} else {
+			fmt.Fprintln(progress, "\nApplying hardening fixes...")
+			bkup, err := backup.NewManager()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not create backup manager: %v — skipping hardening\n", err)
+			} else {
+				hr := hardening.Apply(result.Checks, bkup, scan.Platform(), isRPi)
+				printHardeningResult(progress, hr)
+			}
+		}
+	}
 
 	// OpenClaw audit (always on unless --no-openclaw)
 	var ocChecks []scan.Check
@@ -501,6 +518,20 @@ func lookupByID(username string) (userInfo, error) {
 		home = filepath.Join("/Users", username) // macOS fallback
 	}
 	return userInfo{home: home, uid: uid, gid: gid}, nil
+}
+
+func printHardeningResult(w io.Writer, hr hardening.Result) {
+	for _, a := range hr.Applied {
+		fmt.Fprintf(w, "  ✅ [%s] %s — %s\n", a.CheckID, a.Name, a.Detail)
+	}
+	for _, a := range hr.Failed {
+		fmt.Fprintf(w, "  ❌ [%s] %s — %s\n", a.CheckID, a.Name, a.Detail)
+	}
+	for _, a := range hr.Skipped {
+		fmt.Fprintf(w, "  ⏭  [%s] %s — %s\n", a.CheckID, a.Name, a.Detail)
+	}
+	fmt.Fprintf(w, "Hardening complete: %d applied, %d failed, %d skipped\n",
+		len(hr.Applied), len(hr.Failed), len(hr.Skipped))
 }
 
 var ocPortSet = map[string]bool{"18789": true, "18791": true, "9090": true, "19001": true}
