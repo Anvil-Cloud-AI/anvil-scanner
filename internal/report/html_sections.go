@@ -442,6 +442,8 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 	return fmt.Sprintf(
 		`    <section><h2>🔴 OpenClaw Known Vulnerabilities — %s</h2>`+
 			`<div class="wbox">⚠️ <strong>%s vulnerabilities — upgrade OpenClaw to the latest available version</strong></div>`+
+			`<p style="color:#94a3b8;font-size:.82rem;margin:8px 0 12px;">Each row below is a known CVE or security advisory that affects your installed version. `+
+			`<strong style="color:#cbd5e1;">Severity</strong> reflects the advisory rating (CRITICAL → LOW) — all listed items require an upgrade to resolve.</p>`+
 			`%s%s</table>`+
 			`<p class="mut">%s</p>`+
 			`</section>`,
@@ -452,7 +454,7 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 // renderThreatIntel renders the Threat Intelligence section.
 func renderThreatIntel(r *threat.Result) string {
 	if r == nil {
-		return `    <section><h2>🛡️ Threat Intelligence</h2><div style="background:#1c1917;border:1px solid #44403c;border-radius:12px;padding:24px;text-align:center;color:#a8a29e;">Threat Intelligence scan not run. Use <code>--threat-intel</code> to check breach databases, IoC indicators, and CVE exposure.</div></section>`
+		return `    <section><h2>🛡️ Threat Intelligence</h2><div style="background:#1c1917;border:1px solid #44403c;border-radius:12px;padding:24px;text-align:center;color:#a8a29e;">Threat Intelligence scan not run. Use <code>--no-threat-intel</code> to skip it, or re-run without that flag to include breach databases, IoC indicators, and CVE exposure.</div></section>`
 	}
 
 	var sections strings.Builder
