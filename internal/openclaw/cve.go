@@ -82,8 +82,8 @@ type ocCVEEntry struct {
 	Desc          string
 }
 
-// openclawGatewayCVEs is the compiled-in fallback used when neither live fetch
-// nor on-disk cache is available. Keep in sync with security/openclaw-cves.json.
+// openclawGatewayCVEs is the compiled-in last-resort fallback used when neither
+// the live jgamblin/OpenClawCVEs feed nor an on-disk cache is available.
 var openclawGatewayCVEs = []ocCVEEntry{
 	// ── CRITICAL ──────────────────────────────────────────────────────────────
 	{ID: "CVE-2026-22172", AffectedBelow: "2026.3.12", Severity: "CRITICAL", CVSS: 10.0,

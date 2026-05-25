@@ -151,12 +151,12 @@ env -i HOME=$HOME ./anvil-scanner --no-openclaw --html /tmp/no-provider.html
 
 ---
 
-## 6. Threat Intel (`--threat-intel`)
+## 6. Threat Intel (on by default; `--no-threat-intel` to skip)
 
 Requires internet access. Run without API keys first.
 
 ```bash
-./anvil-scanner --no-ai --no-openclaw --threat-intel --html /tmp/threat.html
+./anvil-scanner --no-ai --no-openclaw --html /tmp/threat.html
 ```
 
 | # | What to verify | macOS | Ubuntu | RPi |
@@ -300,7 +300,7 @@ diff /tmp/test.env /tmp/test-decrypted.env
 ## 10. Signal Handling
 
 ```bash
-./anvil-scanner --threat-intel &
+./anvil-scanner &
 sleep 2
 kill -INT $!
 ```
