@@ -20,6 +20,9 @@ func TestKevCacheDir_ReturnsAbsolutePath(t *testing.T) {
 		t.Errorf("kevCacheDir() = %q; want an absolute path", dir)
 	}
 	if _, err := os.Stat(dir); err != nil {
+		if os.IsPermission(err) {
+			t.Skipf("kevCacheDir() %q is not accessible (permission denied — root-owned from prior sudo run): %v", dir, err)
+		}
 		t.Errorf("kevCacheDir() returned %q but Stat() failed: %v", dir, err)
 	}
 }
