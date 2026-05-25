@@ -227,6 +227,7 @@ func TestGenerateHTML_AIFailMessage(t *testing.T) {
 }
 
 // TestGenerateHTML_ExtendedChecks verifies checks table rendering.
+// PASS items are suppressed from the table; only FAIL/WARN/SKIP are shown.
 func TestGenerateHTML_ExtendedChecks(t *testing.T) {
 	d := Data{
 		Platform:  "Darwin",
@@ -241,11 +242,14 @@ func TestGenerateHTML_ExtendedChecks(t *testing.T) {
 	if !strings.Contains(html, "Extended Hardening Checks") {
 		t.Error("expected extended checks section")
 	}
-	if !strings.Contains(html, "SSH-006") {
-		t.Error("expected SSH-006 in extended checks table")
+	if strings.Contains(html, "SSH-006") {
+		t.Error("SSH-006 is PASS and should not appear in the checks table")
 	}
 	if !strings.Contains(html, "MACOS-001") {
-		t.Error("expected MACOS-001 in extended checks table")
+		t.Error("expected MACOS-001 (FAIL) in extended checks table")
+	}
+	if !strings.Contains(html, "passing checks not shown") {
+		t.Error("expected pass-count footer note")
 	}
 }
 

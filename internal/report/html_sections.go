@@ -115,6 +115,7 @@ func renderExtendedChecks(checks []scan.Check) string {
 	pills := renderStatusPills(statusCounts, false)
 
 	catTables := ""
+	passTotal := statusCounts["PASS"]
 	for _, prefix := range catOrder {
 		cc, ok := cats[prefix]
 		if !ok || len(cc) == 0 {
@@ -125,7 +126,12 @@ func renderExtendedChecks(checks []scan.Check) string {
 			label = prefix
 		}
 		rows := ""
+		hasFailWarnSkip := false
 		for _, c := range cc {
+			if c.Status == scan.StatusPass {
+				continue
+			}
+			hasFailWarnSkip = true
 			sc := statusColors[c.Status]
 			svc := severityColors[c.Severity]
 			if sc == "" {
@@ -151,6 +157,9 @@ func renderExtendedChecks(checks []scan.Check) string {
 				svc, e(string(c.Severity)),
 			)
 		}
+		if !hasFailWarnSkip {
+			continue
+		}
 		catTable := fmt.Sprintf(
 			`<h3 style="margin:18px 0 8px;font-size:.92rem;color:#cbd5e1;">%s</h3>`+
 				`<table><tr><th style="width:80px;">ID</th><th>Check</th><th style="width:90px;">Status</th>`+
@@ -160,41 +169,32 @@ func renderExtendedChecks(checks []scan.Check) string {
 
 		// Quick-fix hint for SSH failures
 		if prefix == "SSH" {
-			hasFailWarn := false
-			for _, c := range cc {
-				if c.Status == scan.StatusFail || c.Status == scan.StatusWarn {
-					hasFailWarn = true
-					break
-				}
-			}
-			if hasFailWarn {
-				catTable += `<div style="background:#1c1917;border:1px solid #44403c;border-radius:8px;padding:14px 18px;margin-top:8px;">` +
-					`<p style="color:#94a3b8;margin:0 0 8px;">Fix SSH findings — back up first, then edit sshd_config:</p>` +
-					`<code style="display:block;background:#0f172a;padding:10px 14px;border-radius:6px;color:#7dd3fc;font-size:.9rem;white-space:pre;">sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak&#10;sudo $EDITOR /etc/ssh/sshd_config&#10;sudo sshd -t &amp;&amp; sudo systemctl restart sshd</code>` +
-					`<p style="color:#64748b;font-size:.8rem;margin:8px 0 0;">Use the <em>How to fix</em> links above for each setting. <code>sshd -t</code> validates config before restart.</p></div>`
-			}
+			catTable += `<div style="background:#1c1917;border:1px solid #44403c;border-radius:8px;padding:14px 18px;margin-top:8px;">` +
+				`<p style="color:#94a3b8;margin:0 0 8px;">Fix SSH findings — back up first, then edit sshd_config:</p>` +
+				`<code style="display:block;background:#0f172a;padding:10px 14px;border-radius:6px;color:#7dd3fc;font-size:.9rem;white-space:pre;">sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak&#10;sudo $EDITOR /etc/ssh/sshd_config&#10;sudo sshd -t &amp;&amp; sudo systemctl restart sshd</code>` +
+				`<p style="color:#64748b;font-size:.8rem;margin:8px 0 0;">Use the <em>How to fix</em> links above for each setting. <code>sshd -t</code> validates config before restart.</p></div>`
 		}
 		if prefix == "RPI" {
-			hasFailWarn := false
-			for _, c := range cc {
-				if c.Status == scan.StatusFail || c.Status == scan.StatusWarn {
-					hasFailWarn = true
-					break
-				}
-			}
-			if hasFailWarn {
-				catTable += `<div style="background:#1c1917;border:1px solid #44403c;border-radius:8px;padding:14px 18px;margin-top:8px;">` +
-					`<p style="color:#94a3b8;margin:0 0 8px;">Common Pi hardening steps:</p>` +
-					`<code style="display:block;background:#0f172a;padding:10px 14px;border-radius:6px;color:#7dd3fc;font-size:.9rem;">sudo raspi-config  # Interface Options, System Options</code>` +
-					`<p style="color:#64748b;font-size:.8rem;margin:8px 0 0;">Change default password, disable unused interfaces, configure boot options.</p></div>`
-			}
+			catTable += `<div style="background:#1c1917;border:1px solid #44403c;border-radius:8px;padding:14px 18px;margin-top:8px;">` +
+				`<p style="color:#94a3b8;margin:0 0 8px;">Common Pi hardening steps:</p>` +
+				`<code style="display:block;background:#0f172a;padding:10px 14px;border-radius:6px;color:#7dd3fc;font-size:.9rem;">sudo raspi-config  # Interface Options, System Options</code>` +
+				`<p style="color:#64748b;font-size:.8rem;margin:8px 0 0;">Change default password, disable unused interfaces, configure boot options.</p></div>`
 		}
 		catTables += catTable
 	}
 
+	passNote := ""
+	if passTotal > 0 {
+		passNote = fmt.Sprintf(
+			`<p style="color:#64748b;font-size:.8rem;margin:12px 0 0;">✅ %d passing checks not shown — `+
+				`<a href="%s" target="_blank" style="color:#60a5fa;">full check list →</a></p>`,
+			passTotal, findingDocsBase+"README.md",
+		)
+	}
+
 	return fmt.Sprintf(
-		`<section><h2>🔬 Extended Hardening Checks (%d checks)</h2>%s%s</section>`,
-		len(checks), pills, catTables,
+		`<section><h2>🔬 Extended Hardening Checks (%d checks)</h2>%s%s%s</section>`,
+		len(checks), pills, catTables, passNote,
 	)
 }
 
@@ -271,7 +271,12 @@ func renderOCChecks(checks []scan.Check) string {
 	}
 
 	rows := ""
+	passCount := 0
 	for _, c := range checks {
+		if c.Status == scan.StatusPass {
+			passCount++
+			continue
+		}
 		sc := statusColors[c.Status]
 		svc := severityColors[c.Severity]
 		if sc == "" {
@@ -293,12 +298,29 @@ func renderOCChecks(checks []scan.Check) string {
 			svc, e(string(c.Severity)),
 		)
 	}
+
+	passNote := ""
+	if passCount > 0 {
+		passNote = fmt.Sprintf(
+			`<p style="color:#64748b;font-size:.8rem;margin:12px 0 0;">✅ %d passing checks not shown — `+
+				`<a href="https://docs.openclaw.ai/security" target="_blank" style="color:#60a5fa;">OpenClaw security docs →</a></p>`,
+			passCount,
+		)
+	}
+
+	if rows == "" {
+		return fmt.Sprintf(
+			`    <section><h2>🦞 OpenClaw Security (%d %s)</h2>%s`+
+				`<p style="color:#16a34a;font-weight:600;">✅ All checks passed</p>%s</section>`,
+			len(checks), label, pills, passNote,
+		)
+	}
 	return fmt.Sprintf(
 		`    <section><h2>🦞 OpenClaw Security (%d %s)</h2>%s`+
 			`<table><tr><th style="width:220px;">ID</th><th>Check</th>`+
 			`<th style="width:90px;">Status</th><th>Detail</th>`+
-			`<th style="width:90px;">Severity</th></tr>%s</table></section>`,
-		len(checks), label, pills, rows,
+			`<th style="width:90px;">Severity</th></tr>%s</table>%s</section>`,
+		len(checks), label, pills, rows, passNote,
 	)
 }
 
