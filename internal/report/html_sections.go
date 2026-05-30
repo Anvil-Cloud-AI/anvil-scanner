@@ -338,11 +338,17 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 		)
 	}
 
-	dbFooter := func() string {
-		s := fmt.Sprintf("%d advisories checked · source: %s", r.Checked, r.DBSource)
+	// dbFooterHTML builds the footer line as safe HTML. The repo link is a
+	// hardcoded constant; user-controlled fields go through e().
+	dbFooterHTML := func() string {
+		s := fmt.Sprintf("%d advisories checked · source: %s", r.Checked, e(r.DBSource))
 		if r.DBUpdated != "" {
-			s += " · newest advisory: " + r.DBUpdated
+			s += " · newest advisory: " + e(r.DBUpdated)
 		}
+		s += fmt.Sprintf(
+			` · feed: <a href="%s" target="_blank" rel="noopener noreferrer" style="color:#94a3b8;">github.com/jgamblin/OpenClawCVEs</a>`,
+			openclaw.CVEFeedRepoURL,
+		)
 		return s
 	}
 
@@ -352,7 +358,7 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 				`<p style="color:#16a34a;">✅ No known vulnerabilities</p>`+
 				`<p style="color:#94a3b8;font-size:.85rem;">%s</p>`+
 				`</section>`,
-			e(r.Version), e(dbFooter()),
+			e(r.Version), dbFooterHTML(),
 		)
 	}
 
@@ -447,7 +453,7 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 			`%s%s</table>`+
 			`<p class="mut">%s</p>`+
 			`</section>`,
-		e(r.Version), e(summary), tableHeader, rows, e(dbFooter()),
+		e(r.Version), e(summary), tableHeader, rows, dbFooterHTML(),
 	)
 }
 

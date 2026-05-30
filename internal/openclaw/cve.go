@@ -20,6 +20,10 @@ import (
 // Schema: ghsa-advisories.json — a flat JSON array of advisory objects.
 const cveFeedURL = "https://raw.githubusercontent.com/jgamblin/OpenClawCVEs/main/ghsa-advisories.json"
 
+// CVEFeedRepoURL is the human-readable GitHub repo URL for the advisory feed.
+// Surfaced in the HTML report so users can audit the source.
+const CVEFeedRepoURL = "https://github.com/jgamblin/OpenClawCVEs"
+
 // cveBundledUpdated is the date the compiled-in fallback database was last refreshed.
 const cveBundledUpdated = "2026-05-08"
 
