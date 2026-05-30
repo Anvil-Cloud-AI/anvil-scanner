@@ -22,6 +22,7 @@ import (
 
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/ai"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/backup"
+	iexec "github.com/Anvil-Cloud-AI/anvil-scanner/internal/exec"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/hardening"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/openclaw"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/report"
@@ -69,7 +70,7 @@ func run(ctx context.Context, args []string) error {
 	rotateBackend  := fs.String("rotate-key-backend", "", "Re-encrypt the secrets container under a new backend (keyring|passphrase|file)")
 	secretsBackend := fs.String("backend", "", "Key backend for --init-secrets / --encrypt (keyring|passphrase|file)")
 	doStoreKeyring := fs.Bool("store-keyring", false, "Copy secrets from the container into individual OS keyring entries")
-	doHarden       := fs.Bool("harden", false, "Apply auto-fixable hardening remediation for failing checks (requires root)")
+	doHarden       := fs.Bool("harden", false, "Apply auto-fixable hardening remediation for failing checks (prompts for sudo when needed)")
 
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -185,16 +186,19 @@ func run(ctx context.Context, args []string) error {
 
 	if *doHarden {
 		if os.Getuid() != 0 {
-			fmt.Fprintln(os.Stderr, "⚠  --harden requires root. Re-run with: sudo anvil-scanner --harden")
-		} else {
-			fmt.Fprintln(progress, "\nApplying hardening fixes...")
-			bkup, err := backup.NewManager()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not create backup manager: %v — skipping hardening\n", err)
-			} else {
-				hr := hardening.Apply(result.Checks, bkup, scan.Platform(), isRPi)
-				printHardeningResult(progress, hr)
+			fmt.Fprintln(progress, "\nHardening needs sudo for some operations — you may be prompted for your password.")
+			if err := iexec.WarmSudoCredentials(); err != nil {
+				fmt.Fprintln(os.Stderr, "Error: could not obtain sudo credentials — re-run with sudo or grant NOPASSWD")
+				return nil
 			}
+		}
+		fmt.Fprintln(progress, "\nApplying hardening fixes...")
+		bkup, err := backup.NewManager()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not create backup manager: %v — skipping hardening\n", err)
+		} else {
+			hr := hardening.Apply(result.Checks, bkup, scan.Platform(), isRPi)
+			printHardeningResult(progress, hr)
 		}
 	}
 
