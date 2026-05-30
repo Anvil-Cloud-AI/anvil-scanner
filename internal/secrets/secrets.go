@@ -33,7 +33,15 @@ const passphraseEnvVar = "ANVIL_SECRETS_PASSPHRASE" //nolint:gosec
 
 // ── path helpers ─────────────────────────────────────────────────────────────
 
+// secretsDirOverride may be set in tests to redirect all secrets I/O to a
+// writable temporary directory. It has no effect in normal (non-test) builds
+// because it is initialized to the empty string.
+var secretsDirOverride string
+
 func secretsDir() string {
+	if secretsDirOverride != "" {
+		return secretsDirOverride
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".anvil-scanner")
 }

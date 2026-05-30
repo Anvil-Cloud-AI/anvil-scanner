@@ -27,6 +27,7 @@ const (
 	keyringProbeAccount = "anvil_scanner_probe" // dedicated probe account; never collides with keyringAccount
 	keyringDummyKey     = "ANVILPROBE"
 	keyringTimeout      = 10 * time.Second
+	keyringProbeTimeout = 2 * time.Second // shorter timeout for probe-only operations
 )
 
 var validKeyNameRE = regexp.MustCompile(`^[A-Z0-9_]+$`)
@@ -136,7 +137,7 @@ func deleteKeyringMasterKey() error {
 func storeKeyringProbe() error {
 	switch runtime.GOOS {
 	case "darwin":
-		ctx, cancel := context.WithTimeout(context.Background(), keyringTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), keyringProbeTimeout)
 		defer cancel()
 		r := iexec.RunCtx(ctx, nil, "security", "add-generic-password",
 			"-U",
@@ -149,7 +150,7 @@ func storeKeyringProbe() error {
 		}
 		return nil
 	default: // linux
-		ctx, cancel := context.WithTimeout(context.Background(), keyringTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), keyringProbeTimeout)
 		defer cancel()
 		r := iexec.RunCtx(ctx, strings.NewReader(keyringDummyKey+"\n"),
 			"secret-tool", "store",
@@ -168,7 +169,9 @@ func storeKeyringProbe() error {
 func loadKeyringProbe() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
-		r := iexec.Run("security", "find-generic-password",
+		ctx, cancel := context.WithTimeout(context.Background(), keyringProbeTimeout)
+		defer cancel()
+		r := iexec.RunCtx(ctx, nil, "security", "find-generic-password",
 			"-s", keyringService,
 			"-a", keyringProbeAccount,
 			"-w",
@@ -178,7 +181,9 @@ func loadKeyringProbe() (string, error) {
 		}
 		return strings.TrimSpace(r.Stdout), nil
 	default: // linux
-		r := iexec.Run("secret-tool", "lookup",
+		ctx, cancel := context.WithTimeout(context.Background(), keyringProbeTimeout)
+		defer cancel()
+		r := iexec.RunCtx(ctx, nil, "secret-tool", "lookup",
 			"service", keyringService,
 			"username", keyringProbeAccount,
 		)
@@ -381,6 +386,36 @@ func loadKeyringSecret(name string) (string, bool) {
 			return "", false
 		}
 		return strings.TrimSpace(r.Stdout), true
+	}
+}
+
+// deleteKeyringSecret removes a per-secret keyring entry. Returns nil when the
+// entry was not present (best-effort semantic, mirrors deleteKeyringMasterKey).
+func deleteKeyringSecret(name string) error {
+	if !validKeyNameRE.MatchString(name) {
+		return fmt.Errorf("secrets: invalid key name %q", name)
+	}
+	account := keyringAccount + "/" + name
+	switch runtime.GOOS {
+	case "darwin":
+		r := iexec.Run("security", "delete-generic-password",
+			"-s", keyringService,
+			"-a", account,
+		)
+		// exit 44 = "item not found" on macOS security(1) — treat as success.
+		if r.ExitCode == 44 || r.Success() {
+			return nil
+		}
+		return fmt.Errorf("secrets: delete keyring secret %q (exit %d): see system keyring logs", name, r.ExitCode)
+	default: // linux
+		r := iexec.Run("secret-tool", "clear",
+			"service", keyringService,
+			"username", account,
+		)
+		if r.Success() {
+			return nil
+		}
+		return fmt.Errorf("secrets: delete keyring secret %q (exit %d): see system keyring logs", name, r.ExitCode)
 	}
 }
 
