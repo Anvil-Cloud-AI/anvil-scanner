@@ -18,7 +18,7 @@ var openclawPorts = []string{"18789", "18791", "9090", "19001"}
 // with a digit). Used to count active rules in the FW-001 fallback.
 var iptablesRuleRE = regexp.MustCompile(`^\s*\d+`)
 
-// RunLinuxChecks executes FW-001 through FW-003 and adds results to b.
+// RunLinuxChecks executes FW-001 through FW-003 and F2B-001 and adds results to b.
 // It is a no-op on non-Linux platforms.
 func RunLinuxChecks(b *CheckBuilder, platform string) {
 	if platform != "Linux" {
@@ -28,6 +28,38 @@ func RunLinuxChecks(b *CheckBuilder, platform string) {
 	if fw001 {
 		fw002DefaultDeny(b, ufwOut)
 		fw003OpenClawPorts(b, ufwOut)
+	}
+	f2b001Fail2ban(b)
+}
+
+// f2b001Fail2ban checks whether fail2ban is installed and the sshd jail is
+// active.  Mirrors the FW-001 shape: FAIL if not installed, FAIL if installed
+// but not running, PASS otherwise.
+func f2b001Fail2ban(b *CheckBuilder) {
+	res := exec.Run("fail2ban-client", "status")
+	if res.ExitCode == -1 {
+		b.Fail("F2B-001", "fail2ban active",
+			"fail2ban not installed — SSH brute-force protection unavailable. "+
+				"Install and enable: sudo apt install fail2ban && sudo systemctl enable --now fail2ban",
+			SeverityHigh)
+		return
+	}
+	if !res.Success() {
+		b.Fail("F2B-001", "fail2ban active",
+			"fail2ban installed but the service is not running. "+
+				"Enable and start: sudo systemctl enable --now fail2ban",
+			SeverityHigh)
+		return
+	}
+	// status output contains "Jail list: ..." — sshd is the meaningful one.
+	if strings.Contains(res.Stdout, "sshd") {
+		b.Pass("F2B-001", "fail2ban active",
+			"fail2ban running with sshd jail enabled", SeverityHigh)
+	} else {
+		b.Warn("F2B-001", "fail2ban active",
+			"fail2ban is running but no sshd jail is active. "+
+				"Enable the sshd jail in /etc/fail2ban/jail.local",
+			SeverityHigh)
 	}
 }
 

@@ -40,6 +40,7 @@ func Apply(checks []scan.Check, bkup *backup.Manager, platform string, isRPi boo
 	switch runtime.GOOS {
 	case "linux":
 		applyLinuxFirewall(idx, &r)
+		applyFail2ban(idx, &r)
 	case "darwin":
 		applyMacOSFirewall(idx, &r)
 	}
