@@ -209,6 +209,7 @@ func run(ctx context.Context, args []string) error {
 		fmt.Fprint(progress, "\nRunning OpenClaw security audit...")
 		ob := scan.NewBuilder(scan.WithClock(func() time.Time { return time.Now().UTC() }))
 		openclaw.RunAudit(ob)
+		openclaw.RunContainerAudits(ob)
 		ocResult := ob.Build()
 		ocChecks = ocResult.Checks
 		if len(ocChecks) > 0 && ocChecks[0].Status == scan.StatusSkip {
