@@ -267,9 +267,7 @@ func Analyze(ctx context.Context, prompt string, skip bool, provider Provider) A
 }
 
 // BuildPrompt constructs a rich, OpenClaw-focused AI prompt from full scan data.
-// webIntel is pre-fetched community intelligence (nil or empty = skip that section).
-// Separating the fetch from the build keeps tests free of network calls.
-func BuildPrompt(sc ScanContext, webIntel []IntelItem) (string, error) {
+func BuildPrompt(sc ScanContext) (string, error) {
 	var b strings.Builder
 
 	b.WriteString("You are a security analyst specialising in AI agent deployments. ")
@@ -355,19 +353,6 @@ func BuildPrompt(sc ScanContext, webIntel []IntelItem) (string, error) {
 	}
 	b.WriteString("\n")
 
-	// Community intelligence
-	if len(webIntel) > 0 {
-		b.WriteString("── COMMUNITY SECURITY REPORTS (GitHub / HackerNews) ───────────────────────\n")
-		for _, item := range webIntel {
-			date := item.Date
-			if date == "" {
-				date = "recent"
-			}
-			b.WriteString(fmt.Sprintf("[%s %s] %s\n", item.Source, date, item.Title))
-		}
-		b.WriteString("\n")
-	}
-
 	// Instructions
 	b.WriteString("── ANALYSIS REQUEST ────────────────────────────────────────────────────────\n")
 	b.WriteString("Analyse this specific deployment. Prioritise OpenClaw-specific risks over generic host hardening advice.\n")
@@ -375,9 +360,6 @@ func BuildPrompt(sc ScanContext, webIntel []IntelItem) (string, error) {
 	b.WriteString("1. Configuration risks specific to this OpenClaw setup (channel policies, tool permissions, trust boundaries)\n")
 	b.WriteString("2. Exploit potential of the outstanding CVEs given this observed configuration\n")
 	b.WriteString("3. How system hardening gaps increase OpenClaw's attack surface\n")
-	if len(webIntel) > 0 {
-		b.WriteString("4. Whether any community-reported issues match observations from this scan\n")
-	}
 	b.WriteString("\nRespond ONLY with a valid JSON object — no markdown fencing, no explanation outside the JSON:\n")
 	b.WriteString("{\n")
 	b.WriteString(`  "risk_score": <integer 1-10, where 10 is critical>,` + "\n")

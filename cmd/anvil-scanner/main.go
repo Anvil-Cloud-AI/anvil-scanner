@@ -281,15 +281,8 @@ func run(ctx context.Context, args []string) error {
 		}
 	} else {
 		fmt.Fprintf(progress, "\nRunning AI analysis via %s...\n", aiProviderName)
-		fmt.Fprint(progress, "Fetching community security intelligence...")
-		webIntel := ai.FetchCommunityIntel(ctx)
-		if len(webIntel) > 0 {
-			fmt.Fprintf(progress, " %d item(s)\n", len(webIntel))
-		} else {
-			fmt.Fprintln(progress, " none found")
-		}
 		sc := buildScanContext(scan.Platform(), openPorts, pendingUpdates, result.Checks, ocChecks, ocVulnResult, threatResult)
-		prompt, promptErr := ai.BuildPrompt(sc, webIntel)
+		prompt, promptErr := ai.BuildPrompt(sc)
 		if promptErr != nil {
 			fmt.Fprintf(os.Stderr, "AI prompt error: %s\n", promptErr)
 			analysis = ai.Analysis{Error: promptErr.Error()}

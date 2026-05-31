@@ -199,7 +199,7 @@ func TestBuildPrompt_ContainsKeyFields(t *testing.T) {
 			{ID: "SSH-016", Severity: "high", Detail: "weak MACs"},
 		},
 	}
-	prompt, err := BuildPrompt(sc, nil)
+	prompt, err := BuildPrompt(sc)
 	if err != nil {
 		t.Fatalf("BuildPrompt returned unexpected error: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestBuildPrompt_ValidInputsReturnNonEmptyStringAndNilError(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt, err := BuildPrompt(tc.sc, nil)
+			prompt, err := BuildPrompt(tc.sc)
 			if err != nil {
 				t.Fatalf("BuildPrompt() returned unexpected error: %v", err)
 			}
@@ -242,7 +242,7 @@ func TestBuildPrompt_ValidInputsReturnNonEmptyStringAndNilError(t *testing.T) {
 // JSON schema fields so the AI provider knows the expected response format.
 func TestBuildPrompt_ContainsJSONSchema(t *testing.T) {
 	sc := ScanContext{Platform: "Linux", OpenPorts: []string{"22"}, PendingUpdates: 3}
-	prompt, err := BuildPrompt(sc, nil)
+	prompt, err := BuildPrompt(sc)
 	if err != nil {
 		t.Fatalf("BuildPrompt() error: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestBuildPrompt_PlatformAppearsInPrompt(t *testing.T) {
 	for _, platform := range []string{"Darwin", "Linux", "Raspberry Pi"} {
 		t.Run(platform, func(t *testing.T) {
 			sc := ScanContext{Platform: platform}
-			prompt, err := BuildPrompt(sc, nil)
+			prompt, err := BuildPrompt(sc)
 			if err != nil {
 				t.Fatalf("BuildPrompt() error: %v", err)
 			}
@@ -267,25 +267,6 @@ func TestBuildPrompt_PlatformAppearsInPrompt(t *testing.T) {
 				t.Errorf("BuildPrompt() prompt does not contain platform %q", platform)
 			}
 		})
-	}
-}
-
-// TestBuildPrompt_WebIntelAppearsInPrompt verifies community intel items are
-// included when provided.
-func TestBuildPrompt_WebIntelAppearsInPrompt(t *testing.T) {
-	sc := ScanContext{Platform: "Linux"}
-	intel := []IntelItem{
-		{Source: "GitHub", Date: "2026-05-01", Title: "Prompt injection via open Discord groups"},
-		{Source: "HackerNews", Date: "2026-04-15", Title: "OpenClaw security audit findings"},
-	}
-	prompt, err := BuildPrompt(sc, intel)
-	if err != nil {
-		t.Fatalf("BuildPrompt() error: %v", err)
-	}
-	for _, want := range []string{"GitHub", "HackerNews", "Prompt injection via open Discord groups"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("BuildPrompt() prompt missing web intel item %q", want)
-		}
 	}
 }
 
@@ -304,7 +285,7 @@ func TestBuildPrompt_OCFindingsAppearsInPrompt(t *testing.T) {
 			{ID: "CVE-2026-45004", Severity: "high", Desc: "arbitrary code execution via setup-api.js"},
 		},
 	}
-	prompt, err := BuildPrompt(sc, nil)
+	prompt, err := BuildPrompt(sc)
 	if err != nil {
 		t.Fatalf("BuildPrompt() error: %v", err)
 	}
