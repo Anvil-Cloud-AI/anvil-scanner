@@ -124,20 +124,16 @@ func LocalhostOnlyClient(timeout time.Duration) *http.Client {
 }
 
 // TelemetryClient returns a short-lived client with an explicit TLS 1.2
-// minimum (matching the previous ad-hoc telemetry implementation) while
-// still using the SSRF-safe transport.
+// minimum while using the SSRF-safe transport.
 func TelemetryClient() *http.Client {
+	// Reuse the guarded DialContext from safeTransport so we get full
+	// SSRF protection, then layer on the TLS 1.2 minimum requirement.
 	return &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 			TLSHandshakeTimeout: 5 * time.Second,
-			DialContext: (&net.Dialer{
-				Timeout: 5 * time.Second,
-			}).DialContext,
-			// Note: we still want the SSRF guard even for telemetry.
-			// The original telemetry transport did not have it; we are
-			// deliberately upgrading it here for consistency.
+			DialContext:         safeTransport.DialContext,
 		},
 	}
 }

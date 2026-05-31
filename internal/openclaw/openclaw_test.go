@@ -399,6 +399,10 @@ func TestParseVersionDate(t *testing.T) {
 		{"v2026.4.16", true, 2026, 4, 16},
 		{"2026.4.16-rc1", true, 2026, 4, 16},
 		{"2026.4.16+g3a1b2c", true, 2026, 4, 16},
+		// Real-world output from current OpenClaw builds (program name + date + short git hash).
+		{"OpenClaw 2026.4.16 (be7a415)", true, 2026, 4, 16},
+		{"openclaw 2026.12.1 (abc1234)", true, 2026, 12, 1},
+		{"OpenClaw v2026.4.16 (deadbeef)", true, 2026, 4, 16},
 		{"2026.4", false, 0, 0, 0},
 		{"not-a-version", false, 0, 0, 0},
 		{"", false, 0, 0, 0},

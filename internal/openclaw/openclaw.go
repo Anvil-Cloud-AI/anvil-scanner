@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -262,15 +263,31 @@ func addSkip(b *scan.CheckBuilder, detail string, install InstallInfo) {
 }
 
 // parseVersionDate parses OpenClaw's YYYY.M.D date-based version string.
-// Returns the zero time and false when the string doesn't match the pattern.
+// It is tolerant of real-world output such as "OpenClaw 2026.4.16 (be7a415)",
+// "v2026.4.16-rc1", or "openclaw 2026.12.1 (abc1234)".
+// Returns the zero time and false when no valid date version can be extracted.
 func parseVersionDate(version string) (time.Time, bool) {
-	v := strings.TrimPrefix(version, "v")
-	// Strip any pre-release suffix (e.g. "2026.4.16-rc1" → "2026.4.16").
-	if idx := strings.IndexAny(v, "-+"); idx != -1 {
+	if version == "" {
+		return time.Time{}, false
+	}
+
+	// Extract the first YYYY.M.D (or vYYYY.M.D) we can find. This handles
+	// program-name prefixes and trailing "(git-hash)" or other suffixes.
+	re := regexp.MustCompile(`(?i)v?(\d{4}\.\d{1,2}\.\d{1,2})`)
+	m := re.FindStringSubmatch(version)
+	if m == nil {
+		return time.Time{}, false
+	}
+	v := m[1]
+
+	// Strip any pre-release or build suffix after the date portion
+	// (e.g. -rc1, +g1234, or (be7a415) ).
+	if idx := strings.IndexAny(v, "-+("); idx != -1 {
 		v = v[:idx]
 	}
+
 	parts := strings.Split(v, ".")
-	if len(parts) < 3 {
+	if len(parts) != 3 {
 		return time.Time{}, false
 	}
 	year, e1 := strconv.Atoi(parts[0])
@@ -295,7 +312,7 @@ func addVersionCheck(b *scan.CheckBuilder, install InstallInfo) {
 	vd, ok := parseVersionDate(install.Version)
 	if !ok {
 		b.Skip(versionCheckID, versionCheckName,
-			fmt.Sprintf("version %q is not in YYYY.M.D format; cannot assess freshness", install.Version),
+			fmt.Sprintf("could not extract YYYY.M.D date from version %q; cannot assess freshness", install.Version),
 			scan.SeverityLow)
 		b.WithRemediation(stamp)
 		return

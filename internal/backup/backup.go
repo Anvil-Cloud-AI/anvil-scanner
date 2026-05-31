@@ -16,6 +16,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+
+	iexec "github.com/Anvil-Cloud-AI/anvil-scanner/internal/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -225,8 +227,16 @@ func saveManifest(dst string, data manifestData) error {
 }
 
 // loadManifest reads and parses manifest.json from the given path.
+// Uses io.LimitReader (1 MiB cap) per project security rules to bound memory.
 func loadManifest(path string) (manifestData, error) {
-	raw, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return manifestData{}, err
+	}
+	defer f.Close()
+
+	// 1 MiB cap matches the project's standard file-read guard (see main.go, ioc.go, etc.).
+	raw, err := io.ReadAll(io.LimitReader(f, 1*1024*1024))
 	if err != nil {
 		return manifestData{}, err
 	}
@@ -581,27 +591,32 @@ func DoUninstall(r io.Reader, w io.Writer, force bool) error {
 }
 
 // removeFirewallRules removes ufw (Linux) or pf (macOS) rules best-effort.
+// All privileged operations go through the internal/exec package (explicit args,
+// timeout, output caps, temp+rename for writes, sudo elevation when needed).
 func removeFirewallRules(w io.Writer) {
 	switch runtime.GOOS {
 	case "linux":
 		if ufwPath, err := exec.LookPath("ufw"); err == nil {
 			for _, rule := range []string{"OpenSSH", "18789/tcp", "18791/tcp", "9090/tcp", "19001/tcp"} {
-				cmd := exec.Command(ufwPath, "delete", "allow", rule) //nolint:gosec
-				_ = cmd.Run()
+				// Elevated so the delete actually succeeds when uninstall is run as non-root.
+				// Best-effort: ignore failures.
+				_ = iexec.RunElevated(ufwPath, "delete", "allow", rule)
 			}
 			fmt.Fprintf(w, "OK: ufw rules removed (best-effort)\n")
 		}
 	case "darwin":
 		if pfctlPath, err := exec.LookPath("pfctl"); err == nil {
-			cmd := exec.Command(pfctlPath, "-a", "anvil-scanner", "-F", "all") //nolint:gosec
-			_ = cmd.Run()
+			_ = iexec.RunElevated(pfctlPath, "-a", "anvil-scanner", "-F", "all")
 		}
 		anchorFile := "/etc/pf.anchors/anvil-scanner"
-		if err := os.Remove(anchorFile); err == nil {
+		// Best-effort removal via elevated rm (anchor is root-owned).
+		r := iexec.RunElevated("rm", "-f", anchorFile)
+		if r.Success() {
 			fmt.Fprintf(w, "OK: pf anchor file removed\n")
 		}
 		pfConf := "/etc/pf.conf"
-		if raw, err := os.ReadFile(pfConf); err == nil {
+		// Read via elevated helper (respects project LimitReader + sudo fallback).
+		if raw, err := iexec.ReadFileElevated(pfConf); err == nil {
 			text := string(raw)
 			if strings.Contains(text, "anvil-scanner") {
 				var lines []string
@@ -610,11 +625,10 @@ func removeFirewallRules(w io.Writer) {
 						lines = append(lines, l)
 					}
 				}
-				tmp := pfConf + ".anvil-tmp"
-				if err2 := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), 0o644); err2 == nil { //nolint:gosec // pf.conf is world-readable by design
-					if err3 := os.Rename(tmp, pfConf); err3 == nil {
-						fmt.Fprintf(w, "OK: Removed anvil-scanner reference from pf.conf\n")
-					}
+				newContent := []byte(strings.Join(lines, "\n"))
+				// WriteFileElevated does atomic temp-file + sudo mv (never direct overwrite).
+				if err2 := iexec.WriteFileElevated(pfConf, newContent, "0644"); err2 == nil {
+					fmt.Fprintf(w, "OK: Removed anvil-scanner reference from pf.conf\n")
 				}
 			}
 		}
@@ -627,20 +641,16 @@ func reloadSSHD(w io.Writer) {
 	switch runtime.GOOS {
 	case "linux":
 		if systemctlPath, err := exec.LookPath("systemctl"); err == nil {
-			cmd := exec.Command(systemctlPath, "reload", "sshd") //nolint:gosec
-			_ = cmd.Run()
+			_ = iexec.Run(systemctlPath, "reload", "sshd")
 		} else if servicePath, err := exec.LookPath("service"); err == nil {
-			cmd := exec.Command(servicePath, "ssh", "reload") //nolint:gosec
-			_ = cmd.Run()
+			_ = iexec.Run(servicePath, "ssh", "reload")
 		}
 		fmt.Fprintf(w, "OK: SSH daemon reloaded\n")
 	case "darwin":
 		plist := "/System/Library/LaunchDaemons/ssh.plist"
 		if launchctlPath, err := exec.LookPath("launchctl"); err == nil {
-			cmd := exec.Command(launchctlPath, "unload", plist) //nolint:gosec
-			_ = cmd.Run()
-			cmd = exec.Command(launchctlPath, "load", plist) //nolint:gosec
-			_ = cmd.Run()
+			_ = iexec.Run(launchctlPath, "unload", plist)
+			_ = iexec.Run(launchctlPath, "load", plist)
 		}
 		fmt.Fprintf(w, "OK: SSH daemon reloaded (launchctl)\n")
 	}
