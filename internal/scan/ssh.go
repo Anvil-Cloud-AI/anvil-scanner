@@ -77,16 +77,18 @@ func SSHEnabled(platform string, remoteLoginEnabled *bool) bool {
 
 // GetSSHDirectives returns a case-folded directive→value map for the
 // SSH Configuration table in the report.
-//
-// It prefers `sshd -T` output (when available) because it reflects the
-// *effective* configuration after processing all Include directives and
-// drop-in files (the common situation on modern Ubuntu/Debian). This makes
-// the report accurate even when settings live in /etc/ssh/sshd_config.d/.
-//
-// Falls back to parsing /etc/ssh/sshd_config directly if `sshd -T` cannot
-// be run (older systems, macOS without sshd in PATH, permission issues, etc.).
 func GetSSHDirectives() map[string]string {
-	if cfg := getEffectiveSSHDirectivesViaSSHDMinusT(); cfg != nil {
+	// On macOS we avoid the noisy multi-probe sshd -T dance (which often
+	// triggers repeated sudo prompts and isn't very useful anyway).
+	// We just parse the main file directly. The report layer already
+	// explains the limitations when Remote Login state is unknown.
+	if runtime.GOOS == "darwin" {
+		return parseSshdConfig()
+	}
+
+	// On Linux we try hard to get the effective config via sshd -T because
+	// of heavy use of /etc/ssh/sshd_config.d/ Includes on modern distros.
+	if cfg := getEffectiveSSHDirectivesViaSSHDMinusT(); cfg != nil && cfg["_sshd_t_error"] == "" {
 		return cfg
 	}
 	return parseSshdConfig()
@@ -102,32 +104,34 @@ func GetSSHDirectives() map[string]string {
 func getEffectiveSSHDirectivesViaSSHDMinusT() map[string]string {
 	candidates := []string{"sshd", "/usr/sbin/sshd", "/usr/bin/sshd", "/sbin/sshd"}
 
-	// Try both bare -T and with explicit config file (some systems need this).
+	// Try both bare -T and with explicit config file.
 	argsVariants := [][]string{
 		{"-T"},
 		{"-T", "-f", "/etc/ssh/sshd_config"},
 	}
 
+	alreadyRoot := os.Getuid() == 0
+
 	for _, bin := range candidates {
 		for _, args := range argsVariants {
-			// Try as current user (works if already root or sshd in PATH).
+			// Try as current user first.
 			res := exec.Run(bin, args...)
 			if res.Success() && strings.TrimSpace(res.Stdout) != "" {
 				return parseSSHDMinusTOutput(res.Stdout)
 			}
 
-			// Try elevated (sudo).
-			res = exec.RunElevated(bin, args...)
-			if res.Success() && strings.TrimSpace(res.Stdout) != "" {
-				return parseSSHDMinusTOutput(res.Stdout)
+			// Only try elevated if we're not already root (avoids pointless sudo prompts).
+			if !alreadyRoot {
+				res = exec.RunElevated(bin, args...)
+				if res.Success() && strings.TrimSpace(res.Stdout) != "" {
+					return parseSSHDMinusTOutput(res.Stdout)
+				}
 			}
 		}
 	}
 
-	// All attempts failed — return a diagnostic map so the report can explain why.
-	// The caller (parseSshdConfig) will still run and may set _include.
 	return map[string]string{
-		"_sshd_t_error": "Could not get effective config via sshd -T (tried multiple paths and -f variants, both direct and via sudo). Falling back to reading main sshd_config only.",
+		"_sshd_t_error": "Could not get effective config via sshd -T. Falling back to reading main sshd_config only.",
 	}
 }
 

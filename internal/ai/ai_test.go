@@ -189,23 +189,23 @@ func TestCallOllama_Non200ReturnsError(t *testing.T) {
 
 // TestBuildPrompt_ContainsKeyFields verifies the prompt includes scan data.
 func TestBuildPrompt_ContainsKeyFields(t *testing.T) {
-	prompt, err := BuildPrompt("Darwin", []string{"22", "443"}, 5, 3)
+	sc := ScanContext{
+		Platform:       "Darwin",
+		OpenPorts:      []string{"22", "443"},
+		PendingUpdates: 5,
+		FailingChecks: []CheckSummary{
+			{ID: "SSH-014", Severity: "high", Detail: "weak KEX"},
+			{ID: "SSH-015", Severity: "high", Detail: "weak ciphers"},
+			{ID: "SSH-016", Severity: "high", Detail: "weak MACs"},
+		},
+	}
+	prompt, err := BuildPrompt(sc, nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt returned unexpected error: %v", err)
 	}
-	for _, want := range []string{"Darwin", "22", "443", "pending_update_count", "priority_findings"} {
-		if len(prompt) == 0 {
-			t.Fatal("empty prompt")
-		}
-		found := false
-		for i := 0; i < len(prompt)-len(want)+1; i++ {
-			if prompt[i:i+len(want)] == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected %q in prompt, prompt snippet: %.200s", want, prompt)
+	for _, want := range []string{"Darwin", "22", "443", "risk_score", "recommendations"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected %q in prompt, snippet: %.300s", want, prompt)
 		}
 	}
 }
@@ -216,21 +216,18 @@ func TestBuildPrompt_ContainsKeyFields(t *testing.T) {
 // primary contract: valid inputs yield a non-empty prompt string and nil error.
 func TestBuildPrompt_ValidInputsReturnNonEmptyStringAndNilError(t *testing.T) {
 	tests := []struct {
-		name           string
-		platform       string
-		openPorts      []string
-		pendingUpdates int
-		priorityCount  int
+		name string
+		sc   ScanContext
 	}{
-		{"darwin no ports", "Darwin", []string{}, 0, 0},
-		{"linux with ports", "Linux", []string{"22", "80", "443"}, 12, 5},
-		{"empty platform", "", []string{"8080"}, 1, 1},
-		{"large counts", "Linux", []string{"22"}, 999, 50},
-		{"nil ports slice", "Darwin", nil, 0, 0},
+		{"darwin no ports", ScanContext{Platform: "Darwin", OpenPorts: []string{}, PendingUpdates: 0}},
+		{"linux with ports", ScanContext{Platform: "Linux", OpenPorts: []string{"22", "80", "443"}, PendingUpdates: 12}},
+		{"empty platform", ScanContext{Platform: "", OpenPorts: []string{"8080"}, PendingUpdates: 1}},
+		{"large counts", ScanContext{Platform: "Linux", OpenPorts: []string{"22"}, PendingUpdates: 999}},
+		{"nil ports slice", ScanContext{Platform: "Darwin", OpenPorts: nil, PendingUpdates: 0}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt, err := BuildPrompt(tc.platform, tc.openPorts, tc.pendingUpdates, tc.priorityCount)
+			prompt, err := BuildPrompt(tc.sc, nil)
 			if err != nil {
 				t.Fatalf("BuildPrompt() returned unexpected error: %v", err)
 			}
@@ -244,7 +241,8 @@ func TestBuildPrompt_ValidInputsReturnNonEmptyStringAndNilError(t *testing.T) {
 // TestBuildPrompt_ContainsJSONSchema verifies the prompt includes the required
 // JSON schema fields so the AI provider knows the expected response format.
 func TestBuildPrompt_ContainsJSONSchema(t *testing.T) {
-	prompt, err := BuildPrompt("Linux", []string{"22"}, 3, 2)
+	sc := ScanContext{Platform: "Linux", OpenPorts: []string{"22"}, PendingUpdates: 3}
+	prompt, err := BuildPrompt(sc, nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt() error: %v", err)
 	}
@@ -260,7 +258,8 @@ func TestBuildPrompt_ContainsJSONSchema(t *testing.T) {
 func TestBuildPrompt_PlatformAppearsInPrompt(t *testing.T) {
 	for _, platform := range []string{"Darwin", "Linux", "Raspberry Pi"} {
 		t.Run(platform, func(t *testing.T) {
-			prompt, err := BuildPrompt(platform, []string{}, 0, 0)
+			sc := ScanContext{Platform: platform}
+			prompt, err := BuildPrompt(sc, nil)
 			if err != nil {
 				t.Fatalf("BuildPrompt() error: %v", err)
 			}
@@ -268,5 +267,50 @@ func TestBuildPrompt_PlatformAppearsInPrompt(t *testing.T) {
 				t.Errorf("BuildPrompt() prompt does not contain platform %q", platform)
 			}
 		})
+	}
+}
+
+// TestBuildPrompt_WebIntelAppearsInPrompt verifies community intel items are
+// included when provided.
+func TestBuildPrompt_WebIntelAppearsInPrompt(t *testing.T) {
+	sc := ScanContext{Platform: "Linux"}
+	intel := []IntelItem{
+		{Source: "GitHub", Date: "2026-05-01", Title: "Prompt injection via open Discord groups"},
+		{Source: "HackerNews", Date: "2026-04-15", Title: "OpenClaw security audit findings"},
+	}
+	prompt, err := BuildPrompt(sc, intel)
+	if err != nil {
+		t.Fatalf("BuildPrompt() error: %v", err)
+	}
+	for _, want := range []string{"GitHub", "HackerNews", "Prompt injection via open Discord groups"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("BuildPrompt() prompt missing web intel item %q", want)
+		}
+	}
+}
+
+// TestBuildPrompt_OCFindingsAppearsInPrompt verifies OpenClaw audit findings
+// are surfaced in the prompt.
+func TestBuildPrompt_OCFindingsAppearsInPrompt(t *testing.T) {
+	sc := ScanContext{
+		Platform: "Linux",
+		OCFindings: []CheckSummary{
+			{ID: "security.exposure.open_groups", Severity: "critical", Detail: "open groups with elevated tools"},
+		},
+		OCVersion:   "2026.4.16",
+		OCCVEHigh:   7,
+		OCCVEMedium: 26,
+		OCTopCVEs: []CVESummary{
+			{ID: "CVE-2026-45004", Severity: "high", Desc: "arbitrary code execution via setup-api.js"},
+		},
+	}
+	prompt, err := BuildPrompt(sc, nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt() error: %v", err)
+	}
+	for _, want := range []string{"2026.4.16", "CVE-2026-45004", "open groups with elevated tools"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("BuildPrompt() prompt missing %q", want)
+		}
 	}
 }

@@ -162,7 +162,17 @@ func patchSSHConfig(path string, raw []byte, patches map[string]struct{ canonica
 	// Validate before committing.
 	res := iexec.Run("sshd", "-t", "-f", tmpPath)
 	if !res.Success() {
-		return false, nil, fmt.Errorf("sshd -t validation failed: %s", strings.TrimSpace(res.Stderr+res.Stdout))
+		errMsg := strings.TrimSpace(res.Stderr + res.Stdout)
+
+		// On macOS it's common to have no host keys generated yet (especially
+		// if Remote Login was only recently enabled). In that case we still
+		// want to apply the hardening changes the user asked for.
+		if runtime.GOOS == "darwin" && strings.Contains(errMsg, "no hostkeys available") {
+			// Proceed with writing the config anyway (the changes are still
+			// correct and will take effect once Remote Login / sshd has keys).
+		} else {
+			return false, nil, fmt.Errorf("sshd -t validation failed: %s", errMsg)
+		}
 	}
 
 	// Write to the real destination via sudo (stages through /tmp internally).

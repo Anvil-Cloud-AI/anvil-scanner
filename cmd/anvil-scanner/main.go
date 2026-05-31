@@ -281,7 +281,15 @@ func run(ctx context.Context, args []string) error {
 		}
 	} else {
 		fmt.Fprintf(progress, "\nRunning AI analysis via %s...\n", aiProviderName)
-		prompt, promptErr := ai.BuildPrompt(scan.Platform(), openPorts, pendingUpdates, len(report.PriorityFindings(result.Checks)))
+		fmt.Fprint(progress, "Fetching community security intelligence...")
+		webIntel := ai.FetchCommunityIntel(ctx)
+		if len(webIntel) > 0 {
+			fmt.Fprintf(progress, " %d item(s)\n", len(webIntel))
+		} else {
+			fmt.Fprintln(progress, " none found")
+		}
+		sc := buildScanContext(scan.Platform(), openPorts, pendingUpdates, result.Checks, ocChecks, ocVulnResult, threatResult)
+		prompt, promptErr := ai.BuildPrompt(sc, webIntel)
 		if promptErr != nil {
 			fmt.Fprintf(os.Stderr, "AI prompt error: %s\n", promptErr)
 			analysis = ai.Analysis{Error: promptErr.Error()}
@@ -580,4 +588,119 @@ func filterExposedOCPorts(openPorts []string) []string {
 		}
 	}
 	return exposed
+}
+
+// buildScanContext translates live scan types into the flat ai.ScanContext
+// so the ai package stays decoupled from scan/openclaw/threat.
+func buildScanContext(
+	platform string,
+	openPorts []string,
+	pendingUpdates int,
+	checks []scan.Check,
+	ocChecks []scan.Check,
+	ocVuln *openclaw.OCVulnResult,
+	tr *threat.Result,
+) ai.ScanContext {
+	sc := ai.ScanContext{
+		Platform:       platform,
+		OpenPorts:      openPorts,
+		PendingUpdates: pendingUpdates,
+	}
+
+	// System hardening — collect failing/warning checks, cap at 20
+	for _, c := range checks {
+		if c.Status != scan.StatusFail && c.Status != scan.StatusWarn {
+			continue
+		}
+		detail := c.Detail
+		if len(detail) > 120 {
+			detail = detail[:117] + "..."
+		}
+		sc.FailingChecks = append(sc.FailingChecks, ai.CheckSummary{
+			ID:       string(c.ID),
+			Severity: string(c.Severity),
+			Detail:   detail,
+		})
+		if len(sc.FailingChecks) >= 20 {
+			break
+		}
+	}
+
+	// OpenClaw audit findings
+	for _, c := range ocChecks {
+		if c.Status == scan.StatusSkip {
+			continue
+		}
+		detail := c.Detail
+		if len(detail) > 150 {
+			detail = detail[:147] + "..."
+		}
+		sc.OCFindings = append(sc.OCFindings, ai.CheckSummary{
+			ID:       string(c.ID),
+			Severity: string(c.Severity),
+			Detail:   detail,
+		})
+	}
+
+	// OpenClaw CVE data
+	if ocVuln != nil {
+		sc.OCVersion = ocVuln.Version
+		for _, f := range ocVuln.Findings {
+			sev := strings.ToLower(f.Severity)
+			switch sev {
+			case "critical", "high":
+				sc.OCCVEHigh++
+			case "medium":
+				sc.OCCVEMedium++
+			default:
+				sc.OCCVELow++
+			}
+			if len(sc.OCTopCVEs) < 10 && (sev == "critical" || sev == "high") {
+				desc := f.Desc
+				if len(desc) > 100 {
+					desc = desc[:97] + "..."
+				}
+				sc.OCTopCVEs = append(sc.OCTopCVEs, ai.CVESummary{
+					ID:       f.ID,
+					Severity: sev,
+					Desc:     desc,
+				})
+			}
+		}
+	}
+
+	// Threat intelligence
+	if tr != nil && !tr.Skipped {
+		for _, p := range tr.Shodan.Ports {
+			sc.ShodanPorts = append(sc.ShodanPorts, fmt.Sprintf("%d", p))
+		}
+		sc.ShodanCVEs = tr.Shodan.Vulns
+		sc.ShodanTags = tr.Shodan.Tags
+		sc.AbuseScore = tr.AbuseIPDB.AbuseScore
+		sc.AbuseHasKey = !tr.AbuseIPDB.Skipped
+
+		allIoC := flatten(
+			tr.LocalIOC.SuspiciousCron,
+			tr.LocalIOC.SuspiciousProcesses,
+			tr.LocalIOC.SuspiciousTempFiles,
+			tr.LocalIOC.SSHPersistence,
+			tr.LocalIOC.ListeningBackdoors,
+			tr.LocalIOC.AuthAnomalies,
+		)
+		sc.HasIoC = len(allIoC) > 0
+		if len(allIoC) > 5 {
+			allIoC = allIoC[:5]
+		}
+		sc.IoCItems = allIoC
+	}
+
+	return sc
+}
+
+func flatten(slices ...[]string) []string {
+	var out []string
+	for _, s := range slices {
+		out = append(out, s...)
+	}
+	return out
 }

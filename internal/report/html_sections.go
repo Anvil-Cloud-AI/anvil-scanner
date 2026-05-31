@@ -103,9 +103,18 @@ func renderSSHConfig(d Data, platform string) string {
 
 	// Normal path
 	rows := sshRow("PermitRootLogin") + sshRow("PasswordAuthentication")
-	if isMacOS && d.RemoteLogin != nil && *d.RemoteLogin {
-		rows = `<tr><td>Remote Login (SSH)</td><td>🟡 <code>enabled</code> — SSH server is on; directives below apply.</td></tr>` + rows
+
+	if isMacOS {
+		if d.RemoteLogin != nil && *d.RemoteLogin {
+			rows = `<tr><td>Remote Login (SSH)</td><td>🟡 <code>enabled</code> — SSH server is on; directives below apply.</td></tr>` + rows
+		} else if d.RemoteLogin == nil {
+			// Common when running under sudo on macOS
+			rows = `<tr><td colspan="2" style="color:#94a3b8;font-size:.83rem;">ℹ Remote Login state unknown (scan ran under sudo). The values below reflect /etc/ssh/sshd_config only.</td></tr>` + rows
+		}
+		// On macOS we rarely have the Linux-style Include noise, so we skip the generic include warning.
+		return rows
 	}
+
 	if includeMsg, ok := d.SSHDirectives["_include"]; ok {
 		rows += fmt.Sprintf(
 			`<tr><td colspan="2" style="color:#d97706;font-size:.83rem;">⚠ %s</td></tr>`,
