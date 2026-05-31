@@ -208,6 +208,13 @@ func run(ctx context.Context, args []string) error {
 			scan.RunAllChecksInto(b2)
 			runRPIChecks(b2)
 			result = b2.Build()
+
+			// Print a post-harden summary so the user can see the final state
+			// without scrolling up.  Without this, the pre-harden FAIL/WARN
+			// findings stay visible above as the most prominent output and the
+			// fact that things are now passing is buried in the harden lines.
+			fmt.Fprintln(progress, "\nPost-harden state:")
+			printSummaryTo(progress, result)
 		}
 	}
 
