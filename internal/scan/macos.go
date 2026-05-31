@@ -91,14 +91,27 @@ func macos003Gatekeeper(b *CheckBuilder) {
 }
 
 // macos004Firewall — Application Layer Firewall.
-// globalstate: 0 = off, 1 = on (block all incoming), 2 = on (allow
-// signed). Any value ≥ 1 is PASS.
+// Uses the official socketfilterfw tool when available (more reliable
+// on modern macOS). Falls back to reading the alf plist directly.
 func macos004Firewall(b *CheckBuilder) {
-	res := exec.Run("defaults", "read",
+	// Preferred method on modern macOS (works better without root in many cases).
+	res := exec.Run("/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate")
+	if res.Success() {
+		out := strings.ToLower(strings.TrimSpace(res.Stdout))
+		if strings.Contains(out, "enabled") {
+			b.Pass("MACOS-004", "macOS Firewall enabled", res.Stdout, SeverityHigh)
+		} else {
+			b.Fail("MACOS-004", "macOS Firewall enabled", res.Stdout, SeverityHigh)
+		}
+		return
+	}
+
+	// Fallback: direct plist read (older behavior).
+	res = exec.Run("defaults", "read",
 		"/Library/Preferences/com.apple.alf", "globalstate")
 	if !res.Success() {
 		b.Skip("MACOS-004", "macOS Firewall enabled",
-			"Could not read firewall preferences", SeverityHigh)
+			"Could not read firewall preferences (neither socketfilterfw nor defaults succeeded)", SeverityHigh)
 		return
 	}
 	out := strings.TrimSpace(res.Stdout)
