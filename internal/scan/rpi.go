@@ -293,7 +293,7 @@ func rpi004Camera(b *CheckBuilder, info RPIInfo) {
 	if info.HasCamera {
 		b.Warn("RPI-004", "Camera interface enabled",
 			"Camera interface (/dev/video0) is enabled. If not needed for your OpenClaw "+
-				"deployment, disable via: sudo raspi-config → Interface Options → Camera",
+				"deployment, disable via: raspi-config → Interface Options → Camera",
 			SeverityLow)
 	} else {
 		b.Pass("RPI-004", "Camera interface enabled",
@@ -311,7 +311,7 @@ func rpi005Bluetooth(b *CheckBuilder, info RPIInfo) {
 	if res.Success() && strings.Contains(strings.TrimSpace(res.Stdout), "active") {
 		b.Warn("RPI-005", "Bluetooth service running",
 			"Bluetooth is active. If not needed, disable to reduce attack surface: "+
-				"sudo systemctl disable --now bluetooth",
+				"systemctl disable --now bluetooth",
 			SeverityMedium)
 	} else {
 		b.Pass("RPI-005", "Bluetooth service running",
@@ -344,7 +344,7 @@ func rpi006BootPermissions(b *CheckBuilder) {
 	if len(issues) > 0 {
 		b.Fail("RPI-006", "Boot partition file permissions",
 			"Critical boot files are world-writable: "+strings.Join(issues, "; ")+
-				fmt.Sprintf(". Fix: sudo chmod 644 %s/config.txt %s/cmdline.txt",
+				fmt.Sprintf(". Fix: chmod 644 %s/config.txt %s/cmdline.txt",
 					bootPath, bootPath),
 			SeverityHigh)
 	} else {
@@ -383,7 +383,7 @@ func rpi007AutoLogin(b *CheckBuilder) {
 	if autologin {
 		b.Fail("RPI-007", "Automatic console login disabled",
 			"Auto-login is configured — anyone with physical access gets a shell. "+
-				"Disable via: sudo raspi-config → System Options → Boot / Auto Login",
+				"Disable via: raspi-config → System Options → Boot / Auto Login",
 			SeverityHigh)
 	} else {
 		b.Pass("RPI-007", "Automatic console login disabled",
@@ -420,7 +420,7 @@ func rpi008Swap(b *CheckBuilder) {
 		case total == 0:
 			b.Warn("RPI-008", "Swap space configured",
 				"No swap space configured. On memory-constrained Pi hardware, this increases "+
-					"OOM-kill risk for OpenClaw. Enable swap: sudo dphys-swapfile setup && sudo dphys-swapfile swapon",
+					"OOM-kill risk for OpenClaw. Enable swap: dphys-swapfile setup && dphys-swapfile swapon",
 				SeverityMedium)
 		case total < 512:
 			b.Warn("RPI-008", "Swap space configured",
@@ -521,7 +521,7 @@ func rpi010HardwareInterfaces(b *CheckBuilder) {
 	if len(enabled) > 0 {
 		b.Warn("RPI-010", "Unnecessary hardware interfaces disabled",
 			strings.Join(enabled, ", ")+" interface(s) enabled. If not needed for your "+
-				"deployment, disable via: sudo raspi-config → Interface Options",
+				"deployment, disable via: raspi-config → Interface Options",
 			SeverityLow)
 	} else {
 		b.Pass("RPI-010", "Unnecessary hardware interfaces disabled",
