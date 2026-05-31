@@ -17,15 +17,27 @@ import (
 // with the package; jail.local takes precedence and survives upgrades.
 const jailLocalPath = "/etc/fail2ban/jail.local"
 
+// jailMarker identifies files we previously wrote.  Used to make rewrite
+// idempotent — we update our own config to ship fixes, but never clobber a
+// hand-edited jail.local.
+const jailMarker = "# Managed by anvil-scanner --harden."
+
 // jailLocalContent is a conservative starting point: 5 failed attempts in
 // 10 minutes triggers a 1-hour ban on sshd.  Users can tune later in the
 // same file.
+//
+// backend = systemd is required on modern Ubuntu (22.04+) and most current
+// systemd distros — /var/log/auth.log is no longer written by default, so
+// the default file backend silently produces an inactive jail.  Reading
+// from the systemd journal works on every systemd host that runs sshd.
 const jailLocalContent = `# Managed by anvil-scanner --harden.
 # Customise freely; subsequent --harden runs leave this file alone.
 [DEFAULT]
 bantime  = 3600
 findtime = 600
 maxretry = 5
+ignoreip = 127.0.0.1/8 ::1
+backend  = systemd
 
 [sshd]
 enabled = true
@@ -49,9 +61,20 @@ func applyFail2ban(idx map[string]scan.Status, r *Result) {
 		installedNow = true
 	}
 
-	// Write jail.local only if it's missing — never clobber user customisations.
+	// Decide whether to write jail.local:
+	//   - file missing  → write
+	//   - we wrote it before (marker present) → overwrite (lets us ship fixes)
+	//   - user-authored (no marker) → leave alone, never clobber customisations
 	wroteJail := false
+	shouldWrite := false
 	if _, statErr := os.Stat(jailLocalPath); os.IsNotExist(statErr) {
+		shouldWrite = true
+	} else if existing, readErr := iexec.ReadFileElevated(jailLocalPath); readErr == nil {
+		if strings.Contains(string(existing), jailMarker) {
+			shouldWrite = true
+		}
+	}
+	if shouldWrite {
 		if err := iexec.WriteFileElevated(jailLocalPath, []byte(jailLocalContent), "0644"); err != nil {
 			r.failed("F2B-001", "fail2ban active",
 				fmt.Sprintf("write %s: %v", jailLocalPath, err))

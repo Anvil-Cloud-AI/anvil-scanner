@@ -48,7 +48,11 @@ func applyLinuxFirewall(idx map[string]scan.Status, r *Result) {
 		}
 	}
 
-	if needsFix(idx, "FW-002") {
+	// Apply default deny inbound when FW-002 is explicitly flagged, OR when
+	// we just installed/enabled ufw (in that case FW-002 was never assessed
+	// by the scan — fw002DefaultDeny is gated on ufw being active — so it
+	// won't appear in the needsFix index even though it needs to be set).
+	if needsFix(idx, "FW-002") || installedNow || needsFix(idx, "FW-001") {
 		res := iexec.RunElevated("ufw", "default", "deny", "incoming")
 		if res.Success() {
 			r.applied("FW-002", "Default deny inbound", "ufw default deny incoming")

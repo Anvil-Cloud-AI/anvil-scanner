@@ -199,6 +199,15 @@ func run(ctx context.Context, args []string) error {
 		} else {
 			hr := hardening.Apply(result.Checks, bkup, scan.Platform(), isRPi)
 			printHardeningResult(progress, hr)
+
+			// Re-scan so the report reflects the post-harden state.  Without
+			// this the HTML report still shows the original FAIL/WARN findings
+			// for items we just fixed, which is confusing.
+			fmt.Fprintln(progress, "\nRe-scanning to reflect applied changes...")
+			b2 := scan.NewBuilder(scan.WithClock(func() time.Time { return time.Now().UTC() }))
+			scan.RunAllChecksInto(b2)
+			runRPIChecks(b2)
+			result = b2.Build()
 		}
 	}
 
