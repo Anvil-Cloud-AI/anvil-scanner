@@ -55,7 +55,7 @@ func applyFail2ban(idx map[string]scan.Status, r *Result) {
 
 	installedNow := false
 	if _, err := osexec.LookPath("fail2ban-client"); err != nil {
-		if !aptInstall("fail2ban", "F2B-001", "fail2ban active", r) {
+		if !aptInstall("fail2ban", "F2B-001", "fail2ban service", r) {
 			return
 		}
 		installedNow = true
@@ -76,7 +76,7 @@ func applyFail2ban(idx map[string]scan.Status, r *Result) {
 	}
 	if shouldWrite {
 		if err := iexec.WriteFileElevated(jailLocalPath, []byte(jailLocalContent), "0644"); err != nil {
-			r.failed("F2B-001", "fail2ban active",
+			r.failed("F2B-001", "fail2ban service",
 				fmt.Sprintf("write %s: %v", jailLocalPath, err))
 			return
 		}
@@ -86,13 +86,35 @@ func applyFail2ban(idx map[string]scan.Status, r *Result) {
 	// Enable + start (or restart, if it was already running with old config).
 	enableRes := iexec.RunElevated("systemctl", "enable", "--now", "fail2ban")
 	if !enableRes.Success() {
-		r.failed("F2B-001", "fail2ban active",
+		r.failed("F2B-001", "fail2ban service",
 			fmt.Sprintf("systemctl enable --now fail2ban: %s", strings.TrimSpace(enableRes.Stderr+enableRes.Stdout)))
 		return
 	}
 	if wroteJail {
 		// Pick up the new jail.  Restart is safer than reload across versions.
-		_ = iexec.RunElevated("systemctl", "restart", "fail2ban")
+		if restartRes := iexec.RunElevated("systemctl", "restart", "fail2ban"); !restartRes.Success() {
+			r.failed("F2B-001", "fail2ban service",
+				fmt.Sprintf("systemctl restart fail2ban failed after writing jail.local: %s — config is likely invalid, run: sudo systemctl status fail2ban",
+					strings.TrimSpace(restartRes.Stderr+restartRes.Stdout)))
+			return
+		}
+	}
+
+	// Verify the service is actually running.  systemctl enable --now can
+	// report success on a forking unit even if the daemon crashes right
+	// after fork (bad jail config, missing dependency, etc.).  Confirm
+	// with is-active before claiming the apply succeeded.
+	activeRes := iexec.Run("systemctl", "is-active", "fail2ban")
+	if strings.TrimSpace(activeRes.Stdout) != "active" {
+		// Pull a snippet of journalctl output to give the user something to act on.
+		jr := iexec.RunElevated("journalctl", "-u", "fail2ban", "-n", "20", "--no-pager")
+		journal := strings.TrimSpace(jr.Stdout)
+		if len(journal) > 400 {
+			journal = "..." + journal[len(journal)-400:]
+		}
+		r.failed("F2B-001", "fail2ban service",
+			fmt.Sprintf("service did not reach active state — check: sudo systemctl status fail2ban\n%s", journal))
+		return
 	}
 
 	var details []string
@@ -102,6 +124,6 @@ func applyFail2ban(idx map[string]scan.Status, r *Result) {
 	if wroteJail {
 		details = append(details, "wrote "+jailLocalPath+" with sshd jail enabled")
 	}
-	details = append(details, "enabled + started fail2ban service")
-	r.applied("F2B-001", "fail2ban active", strings.Join(details, "; "))
+	details = append(details, "enabled + started fail2ban service (verified active)")
+	r.applied("F2B-001", "fail2ban service", strings.Join(details, "; "))
 }

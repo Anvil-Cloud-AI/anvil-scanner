@@ -38,14 +38,14 @@ func RunLinuxChecks(b *CheckBuilder, platform string) {
 func f2b001Fail2ban(b *CheckBuilder) {
 	res := exec.Run("fail2ban-client", "status")
 	if res.ExitCode == -1 {
-		b.Fail("F2B-001", "fail2ban active",
+		b.Fail("F2B-001", "fail2ban service",
 			"fail2ban not installed — SSH brute-force protection unavailable. "+
 				"Install and enable: sudo apt install fail2ban && sudo systemctl enable --now fail2ban",
 			SeverityHigh)
 		return
 	}
 	if !res.Success() {
-		b.Fail("F2B-001", "fail2ban active",
+		b.Fail("F2B-001", "fail2ban service",
 			"fail2ban installed but the service is not running. "+
 				"Enable and start: sudo systemctl enable --now fail2ban",
 			SeverityHigh)
@@ -53,10 +53,10 @@ func f2b001Fail2ban(b *CheckBuilder) {
 	}
 	// status output contains "Jail list: ..." — sshd is the meaningful one.
 	if strings.Contains(res.Stdout, "sshd") {
-		b.Pass("F2B-001", "fail2ban active",
+		b.Pass("F2B-001", "fail2ban service",
 			"fail2ban running with sshd jail enabled", SeverityHigh)
 	} else {
-		b.Warn("F2B-001", "fail2ban active",
+		b.Warn("F2B-001", "fail2ban service",
 			"fail2ban is running but no sshd jail is active. "+
 				"Enable the sshd jail in /etc/fail2ban/jail.local",
 			SeverityHigh)
