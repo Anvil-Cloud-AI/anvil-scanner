@@ -7,12 +7,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	osexec "os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
@@ -94,33 +92,6 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	// Re-exec under sudo for any operation that touches system files.
-	// Secrets management and scheduling run fine as the current user.
-	// This runs before subcommand dispatch so --revert and --uninstall
-	// also get elevation without needing explicit sudo from the caller.
-	isSecretsCmd := *doInitSecrets || *encryptSrc != "" || *decryptDest != "" ||
-		*rotateBackend != "" || *doStoreKeyring
-	isScheduleCmd := *doSchedule || *doUnschedule || *scheduleDry
-	if !isSecretsCmd && !isScheduleCmd && os.Getuid() != 0 {
-		exe, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("cannot resolve binary path for privilege escalation: %w", err)
-		}
-		fmt.Fprintln(os.Stderr, "anvil-scanner needs elevated access — prompting for sudo...")
-		cmd := osexec.Command("sudo", append([]string{"-E", exe}, args...)...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if runErr := cmd.Run(); runErr != nil {
-			var exitErr *osexec.ExitError
-			if errors.As(runErr, &exitErr) {
-				os.Exit(exitErr.ExitCode())
-			}
-			os.Exit(1)
-		}
-		os.Exit(0)
-	}
-
 	// Subcommands that don't run a scan — handle before scan starts.
 	if *doUnschedule {
 		return schedule.Remove()
@@ -160,7 +131,7 @@ func run(ctx context.Context, args []string) error {
 		progress = os.Stderr
 	}
 
-	if os.Getuid() == 0 && os.Getenv("SUDO_USER") == "" {
+	if os.Getuid() == 0 {
 		fmt.Fprintln(os.Stderr, "⚠  WARNING: Running as root.")
 		fmt.Fprintln(os.Stderr, "   Most checks do not require root and run correctly as a normal user.")
 		sudoUser := os.Getenv("SUDO_USER")

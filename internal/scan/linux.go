@@ -51,7 +51,7 @@ func f2b001Fail2ban(b *CheckBuilder) {
 	if _, err := osexec.LookPath("fail2ban-client"); err != nil {
 		b.Fail("F2B-001", "fail2ban service",
 			"fail2ban not installed — SSH brute-force protection unavailable. "+
-				"Install and enable: apt install fail2ban && systemctl enable --now fail2ban",
+				"Install and enable: sudo apt install fail2ban && sudo systemctl enable --now fail2ban",
 			SeverityHigh)
 		return
 	}
@@ -60,7 +60,7 @@ func f2b001Fail2ban(b *CheckBuilder) {
 	if strings.TrimSpace(activeRes.Stdout) != "active" {
 		b.Fail("F2B-001", "fail2ban service",
 			"fail2ban installed but the service is not running. "+
-				"Enable and start: systemctl enable --now fail2ban",
+				"Enable and start: sudo systemctl enable --now fail2ban",
 			SeverityHigh)
 		return
 	}
@@ -116,7 +116,7 @@ func fw001Firewall(b *CheckBuilder) (ufwActive bool, ufwOut string) {
 				return true, ufwRes.Stdout
 			}
 			b.Fail("FW-001", "Firewall (ufw) enabled",
-				"ufw is installed but not active. Run: ufw enable",
+				"ufw is installed but not active. Run: sudo ufw enable",
 				SeverityCritical)
 			return false, ""
 		}
@@ -132,7 +132,7 @@ func fw001Firewall(b *CheckBuilder) (ufwActive bool, ufwOut string) {
 			return false, "" // no verbose output → FW-002/003 are skipped
 		case "inactive", "failed":
 			b.Fail("FW-001", "Firewall (ufw) enabled",
-				"ufw is installed but the service is not active. Run: ufw enable",
+				"ufw is installed but the service is not active. Run: sudo ufw enable",
 				SeverityCritical)
 			return false, ""
 		}
@@ -154,13 +154,13 @@ func fw001Firewall(b *CheckBuilder) (ufwActive bool, ufwOut string) {
 				SeverityCritical)
 		} else {
 			b.Warn("FW-001", "Firewall enabled",
-				"iptables present but no custom rules. Install ufw: apt install ufw",
+				"iptables present but no custom rules. Install ufw: sudo apt install ufw",
 				SeverityCritical)
 		}
 	} else {
 		b.Fail("FW-001", "Firewall enabled",
 			"No firewall detected (ufw not installed, iptables empty or unavailable). "+
-				"Install and enable: apt install ufw && ufw enable",
+				"Install and enable: sudo apt install ufw && sudo ufw enable",
 			SeverityCritical)
 	}
 	return false, ""
@@ -175,7 +175,7 @@ func fw002DefaultDeny(b *CheckBuilder, ufwOut string) {
 			"ufw default policy denies incoming traffic", SeverityHigh)
 	} else {
 		b.Fail("FW-002", "Default deny inbound",
-			"ufw default incoming policy is not deny/reject. Run: ufw default deny incoming",
+			"ufw default incoming policy is not deny/reject. Run: sudo ufw default deny incoming",
 			SeverityHigh)
 	}
 }
@@ -198,7 +198,7 @@ func fw003OpenClawPorts(b *CheckBuilder, ufwOut string) {
 		b.Warn("FW-003", "OpenClaw ports restricted in firewall",
 			"Firewall allows OpenClaw ports from any source: "+
 				strings.Join(violations, "; ")+
-				". Restrict to trusted IPs: ufw allow from <IP> to any port <PORT>",
+				". Restrict to trusted IPs: sudo ufw allow from <IP> to any port <PORT>",
 			SeverityHigh)
 	} else {
 		b.Pass("FW-003", "OpenClaw ports restricted in firewall",
