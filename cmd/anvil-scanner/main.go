@@ -186,10 +186,25 @@ func run(ctx context.Context, args []string) error {
 
 	if *doHarden {
 		if os.Getuid() != 0 {
-			fmt.Fprintln(progress, "\nHardening needs sudo for some operations — you may be prompted for your password.")
+			// Re-warm in case the sudo ticket expired during a long scan.
 			if err := iexec.WarmSudoCredentials(); err != nil {
-				fmt.Fprintln(os.Stderr, "Error: could not obtain sudo credentials — re-run with sudo or grant NOPASSWD")
+				fmt.Fprintln(os.Stderr, "Error: could not obtain sudo credentials for hardening — check your sudo access")
 				return nil
+			}
+		}
+		// On macOS, warn when Remote Login state is unknown (MACOS-005 SKIPped).
+		// This happens when the scanner runs under sudo — systemsetup requires a
+		// non-root admin session. SSH hardening still writes sshd_config, which is
+		// harmless if Remote Login is off, but will take effect if it is ever enabled.
+		if scan.Platform() == "Darwin" {
+			for _, c := range result.Checks {
+				if string(c.ID) == "MACOS-005" && c.Status == scan.StatusSkip {
+					fmt.Fprintln(progress, "\n⚠  Note: Remote Login (SSH server) state could not be verified on this Mac.")
+					fmt.Fprintln(progress, "   SSH config changes will be written to /etc/ssh/sshd_config.")
+					fmt.Fprintln(progress, "   They are harmless if Remote Login is disabled, but will take effect if you enable it.")
+					fmt.Fprintln(progress, "   Re-run without sudo to detect Remote Login state automatically.")
+					break
+				}
 			}
 		}
 		fmt.Fprintln(progress, "\nApplying hardening fixes...")
@@ -266,7 +281,8 @@ func run(ctx context.Context, args []string) error {
 		}
 	} else {
 		fmt.Fprintf(progress, "\nRunning AI analysis via %s...\n", aiProviderName)
-		prompt, promptErr := ai.BuildPrompt(scan.Platform(), openPorts, pendingUpdates, len(report.PriorityFindings(result.Checks)))
+		sc := buildScanContext(scan.Platform(), openPorts, pendingUpdates, result.Checks, ocChecks, ocVulnResult, threatResult)
+		prompt, promptErr := ai.BuildPrompt(sc)
 		if promptErr != nil {
 			fmt.Fprintf(os.Stderr, "AI prompt error: %s\n", promptErr)
 			analysis = ai.Analysis{Error: promptErr.Error()}
@@ -565,4 +581,119 @@ func filterExposedOCPorts(openPorts []string) []string {
 		}
 	}
 	return exposed
+}
+
+// buildScanContext translates live scan types into the flat ai.ScanContext
+// so the ai package stays decoupled from scan/openclaw/threat.
+func buildScanContext(
+	platform string,
+	openPorts []string,
+	pendingUpdates int,
+	checks []scan.Check,
+	ocChecks []scan.Check,
+	ocVuln *openclaw.OCVulnResult,
+	tr *threat.Result,
+) ai.ScanContext {
+	sc := ai.ScanContext{
+		Platform:       platform,
+		OpenPorts:      openPorts,
+		PendingUpdates: pendingUpdates,
+	}
+
+	// System hardening — collect failing/warning checks, cap at 20
+	for _, c := range checks {
+		if c.Status != scan.StatusFail && c.Status != scan.StatusWarn {
+			continue
+		}
+		detail := c.Detail
+		if len(detail) > 120 {
+			detail = detail[:117] + "..."
+		}
+		sc.FailingChecks = append(sc.FailingChecks, ai.CheckSummary{
+			ID:       string(c.ID),
+			Severity: string(c.Severity),
+			Detail:   detail,
+		})
+		if len(sc.FailingChecks) >= 20 {
+			break
+		}
+	}
+
+	// OpenClaw audit findings
+	for _, c := range ocChecks {
+		if c.Status == scan.StatusSkip {
+			continue
+		}
+		detail := c.Detail
+		if len(detail) > 150 {
+			detail = detail[:147] + "..."
+		}
+		sc.OCFindings = append(sc.OCFindings, ai.CheckSummary{
+			ID:       string(c.ID),
+			Severity: string(c.Severity),
+			Detail:   detail,
+		})
+	}
+
+	// OpenClaw CVE data
+	if ocVuln != nil {
+		sc.OCVersion = ocVuln.Version
+		for _, f := range ocVuln.Findings {
+			sev := strings.ToLower(f.Severity)
+			switch sev {
+			case "critical", "high":
+				sc.OCCVEHigh++
+			case "medium":
+				sc.OCCVEMedium++
+			default:
+				sc.OCCVELow++
+			}
+			if len(sc.OCTopCVEs) < 10 && (sev == "critical" || sev == "high") {
+				desc := f.Desc
+				if len(desc) > 100 {
+					desc = desc[:97] + "..."
+				}
+				sc.OCTopCVEs = append(sc.OCTopCVEs, ai.CVESummary{
+					ID:       f.ID,
+					Severity: sev,
+					Desc:     desc,
+				})
+			}
+		}
+	}
+
+	// Threat intelligence
+	if tr != nil && !tr.Skipped {
+		for _, p := range tr.Shodan.Ports {
+			sc.ShodanPorts = append(sc.ShodanPorts, fmt.Sprintf("%d", p))
+		}
+		sc.ShodanCVEs = tr.Shodan.Vulns
+		sc.ShodanTags = tr.Shodan.Tags
+		sc.AbuseScore = tr.AbuseIPDB.AbuseScore
+		sc.AbuseHasKey = !tr.AbuseIPDB.Skipped
+
+		allIoC := flatten(
+			tr.LocalIOC.SuspiciousCron,
+			tr.LocalIOC.SuspiciousProcesses,
+			tr.LocalIOC.SuspiciousTempFiles,
+			tr.LocalIOC.SSHPersistence,
+			tr.LocalIOC.ListeningBackdoors,
+			tr.LocalIOC.AuthAnomalies,
+		)
+		sc.HasIoC = len(allIoC) > 0
+		if len(allIoC) > 5 {
+			allIoC = allIoC[:5]
+		}
+		sc.IoCItems = allIoC
+	}
+
+	return sc
+}
+
+func flatten(slices ...[]string) []string {
+	var out []string
+	for _, s := range slices {
+		out = append(out, s...)
+	}
+	return out
 }

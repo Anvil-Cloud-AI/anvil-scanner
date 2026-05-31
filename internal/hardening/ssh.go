@@ -52,8 +52,13 @@ func applySSH(idx map[string]scan.Status, bkup *backup.Manager, platform string,
 	}
 
 	if len(patches) > 0 {
-		bkup.Backup(sshdConfigPath, "sshd_config before hardening")
-		changed, applied, err := patchSSHConfig(sshdConfigPath, patches)
+		raw, readErr := iexec.ReadFileElevated(sshdConfigPath)
+		if readErr != nil {
+			r.failed("SSH-config", "sshd_config read", readErr.Error())
+			return
+		}
+		bkup.BackupContent(sshdConfigPath, raw, "sshd_config before hardening")
+		changed, applied, err := patchSSHConfig(sshdConfigPath, raw, patches)
 		if err != nil {
 			r.failed("SSH-config", "sshd_config patch", err.Error())
 		} else if changed {
@@ -132,35 +137,47 @@ func rewriteSSHLines(lines []string, patches map[string]struct{ canonical, value
 	return strings.Join(newLines, "\n"), replaced, toAppend
 }
 
-func patchSSHConfig(path string, patches map[string]struct{ canonical, value string }) (bool, []string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return false, nil, fmt.Errorf("read %s: %w", path, err)
-	}
-
+func patchSSHConfig(path string, raw []byte, patches map[string]struct{ canonical, value string }) (bool, []string, error) {
 	newContent, replaced, toAppend := rewriteSSHLines(strings.Split(string(raw), "\n"), patches)
 
 	if len(replaced) == 0 && len(toAppend) == 0 {
 		return false, nil, nil
 	}
 
-	// Write to a temp file alongside the original.
-	tmp := path + ".anvil-tmp"
-	if err := os.WriteFile(tmp, []byte(newContent), 0o600); err != nil {
-		return false, nil, fmt.Errorf("write temp file: %w", err)
+	// Stage to a temp file we own for sshd -t validation (avoids writing to
+	// the root-owned /etc/ssh/ dir before we know the config is valid).
+	tmp, err := os.CreateTemp("", "anvil-sshd-validate-*")
+	if err != nil {
+		return false, nil, fmt.Errorf("create validation temp: %w", err)
 	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.WriteString(newContent); err != nil {
+		tmp.Close()
+		return false, nil, fmt.Errorf("write validation temp: %w", err)
+	}
+	tmp.Close()
 
 	// Validate before committing.
-	res := iexec.Run("sshd", "-t", "-f", tmp)
+	res := iexec.Run("sshd", "-t", "-f", tmpPath)
 	if !res.Success() {
-		os.Remove(tmp)
-		return false, nil, fmt.Errorf("sshd -t validation failed: %s", strings.TrimSpace(res.Stderr+res.Stdout))
+		errMsg := strings.TrimSpace(res.Stderr + res.Stdout)
+
+		// On macOS it's common to have no host keys generated yet (especially
+		// if Remote Login was only recently enabled). In that case we still
+		// want to apply the hardening changes the user asked for.
+		if runtime.GOOS == "darwin" && strings.Contains(errMsg, "no hostkeys available") {
+			// Proceed with writing the config anyway (the changes are still
+			// correct and will take effect once Remote Login / sshd has keys).
+		} else {
+			return false, nil, fmt.Errorf("sshd -t validation failed: %s", errMsg)
+		}
 	}
 
-	// Atomic replace.
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return false, nil, fmt.Errorf("rename temp file: %w", err)
+	// Write to the real destination via sudo (stages through /tmp internally).
+	if err := iexec.WriteFileElevated(path, []byte(newContent), "0600"); err != nil {
+		return false, nil, fmt.Errorf("write %s: %w", path, err)
 	}
 
 	var applied []string
@@ -183,24 +200,24 @@ func patchSSHConfig(path string, patches map[string]struct{ canonical, value str
 // restartSSHD restarts the SSH daemon on the current platform.
 func restartSSHD(platform string) error {
 	if runtime.GOOS == "darwin" {
-		res := iexec.Run("launchctl", "kickstart", "-k", "system/com.openssh.sshd")
+		res := iexec.RunElevated("launchctl", "kickstart", "-k", "system/com.openssh.sshd")
 		if res.Success() {
 			return nil
 		}
 		// Fallback for older macOS.
-		iexec.Run("launchctl", "stop", "com.openssh.sshd")
-		res2 := iexec.Run("launchctl", "start", "com.openssh.sshd")
+		iexec.RunElevated("launchctl", "stop", "com.openssh.sshd")
+		res2 := iexec.RunElevated("launchctl", "start", "com.openssh.sshd")
 		if !res2.Success() {
 			return fmt.Errorf("launchctl restart: %s", strings.TrimSpace(res2.Stderr))
 		}
 		return nil
 	}
 	// Linux: try systemctl sshd then ssh (Ubuntu naming).
-	res := iexec.Run("systemctl", "restart", "sshd")
+	res := iexec.RunElevated("systemctl", "restart", "sshd")
 	if res.Success() {
 		return nil
 	}
-	res2 := iexec.Run("systemctl", "restart", "ssh")
+	res2 := iexec.RunElevated("systemctl", "restart", "ssh")
 	if res2.Success() {
 		return nil
 	}
@@ -219,7 +236,7 @@ func applySSH042(idx map[string]scan.Status, bkup *backup.Manager, r *Result) {
 	}
 	mode := info.Mode().Perm()
 	if mode != 0o600 {
-		if err := os.Chmod(sshdConfigPath, 0o600); err != nil {
+		if err := iexec.ChmodElevated(sshdConfigPath, "0600"); err != nil {
 			r.failed("SSH-042", "sshd_config permissions", "chmod 600: "+err.Error())
 			return
 		}
@@ -242,7 +259,7 @@ func applySSH043(idx map[string]scan.Status, r *Result) {
 	var fixed []string
 	var errs []string
 	for _, k := range keys {
-		if err := os.Chmod(k, 0o600); err != nil {
+		if err := iexec.ChmodElevated(k, "0600"); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", filepath.Base(k), err))
 		} else {
 			fixed = append(fixed, filepath.Base(k))

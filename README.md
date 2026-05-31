@@ -117,6 +117,7 @@ Most operations require **sudo** — scanning reads system files (`/etc/ssh/sshd
 | Operation | Needs sudo | Why |
 |-----------|-----------|-----|
 | `--scan` (full) | Yes | Reads `/etc/shadow`, `/etc/ssh/sshd_config`, kernel parameters |
+| `--harden` | Yes | Modifies firewall rules, SSH config, system files |
 | `--revert` / `--uninstall` | Yes | Restores system files |
 | `--schedule` / `--unschedule` | No | Installs to your user crontab / launchd user agent |
 | Threat intel (default on) | No | Network lookups only |
@@ -149,6 +150,9 @@ sudo anvil-scanner --json-output /tmp/report.json
 # Print JSON report to stdout (for piping)
 sudo anvil-scanner --json
 
+# Apply hardening fixes
+sudo anvil-scanner --harden
+
 # Schedule hourly scan
 anvil-scanner --schedule
 
@@ -164,17 +168,14 @@ sudo anvil-scanner --revert
 # Remove all anvil-scanner changes and backups
 sudo anvil-scanner --uninstall
 
+# Force uninstall even when no backups found
+sudo anvil-scanner --uninstall --force
+
 # Send anonymised scan summary to Anvil telemetry (opt-in)
 sudo anvil-scanner --telemetry
 
 # Print version
 anvil-scanner --version
-
-# Force uninstall even when no backups found
-sudo anvil-scanner --uninstall --force
-
-# Copy secrets from container into individual OS keyring entries
-sudo anvil-scanner --store-keyring
 
 # Specify key backend for --init-secrets / --encrypt
 sudo anvil-scanner --init-secrets --backend keyring

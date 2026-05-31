@@ -519,7 +519,7 @@ func TestRenderExtendedChecks_DetailEscaped(t *testing.T) {
 			Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 	}
-	out := renderExtendedChecks(checks)
+	out := renderExtendedChecks(checks, "Linux", nil)
 
 	if strings.Contains(out, maliciousDetail) {
 		t.Error("raw HTML in check detail must be escaped in extended checks table")

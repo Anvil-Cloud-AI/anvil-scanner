@@ -91,14 +91,27 @@ func macos003Gatekeeper(b *CheckBuilder) {
 }
 
 // macos004Firewall — Application Layer Firewall.
-// globalstate: 0 = off, 1 = on (block all incoming), 2 = on (allow
-// signed). Any value ≥ 1 is PASS.
+// Uses the official socketfilterfw tool when available (more reliable
+// on modern macOS). Falls back to reading the alf plist directly.
 func macos004Firewall(b *CheckBuilder) {
-	res := exec.Run("defaults", "read",
+	// Preferred method on modern macOS (works better without root in many cases).
+	res := exec.Run("/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate")
+	if res.Success() {
+		out := strings.ToLower(strings.TrimSpace(res.Stdout))
+		if strings.Contains(out, "enabled") {
+			b.Pass("MACOS-004", "macOS Firewall enabled", res.Stdout, SeverityHigh)
+		} else {
+			b.Fail("MACOS-004", "macOS Firewall enabled", res.Stdout, SeverityHigh)
+		}
+		return
+	}
+
+	// Fallback: direct plist read (older behavior).
+	res = exec.Run("defaults", "read",
 		"/Library/Preferences/com.apple.alf", "globalstate")
 	if !res.Success() {
 		b.Skip("MACOS-004", "macOS Firewall enabled",
-			"Could not read firewall preferences", SeverityHigh)
+			"Could not read firewall preferences (neither socketfilterfw nor defaults succeeded)", SeverityHigh)
 		return
 	}
 	out := strings.TrimSpace(res.Stdout)
@@ -119,27 +132,45 @@ func macos004Firewall(b *CheckBuilder) {
 
 // macos005RemoteLogin — SSH server toggle.
 // PASS when off (Remote Login disabled), WARN when on (intentional SSH
-// access is fine but worth flagging), SKIP when systemsetup can't run
-// (needs admin privileges — it exits 0 but prints an error to stdout).
+// access is fine but worth flagging), SKIP only when we truly cannot
+// determine the state.
+//
+// When run under sudo, systemsetup often fails. We fall back to checking
+// whether the com.openssh.sshd launchd job is loaded. This is not 100%
+// perfect but is good enough to avoid the noisy "status unknown" path
+// in the report when Remote Login is actually enabled.
 func macos005RemoteLogin(b *CheckBuilder) {
 	res := exec.Run("systemsetup", "-getremotelogin")
 	out := strings.TrimSpace(res.Stdout)
-	// systemsetup exits 0 but prints this when invoked without admin rights.
-	if !res.Success() || strings.Contains(out, "administrator access") {
-		b.Skip("MACOS-005", "Remote Login (SSH) restricted",
-			"Could not check Remote Login state (needs admin privileges — run as an admin user without sudo)",
+
+	if res.Success() && !strings.Contains(out, "administrator access") {
+		lower := strings.ToLower(out)
+		if strings.Contains(lower, "off") {
+			b.Pass("MACOS-005", "Remote Login (SSH) restricted",
+				"Remote Login is Off", SeverityMedium)
+		} else {
+			b.Warn("MACOS-005", "Remote Login (SSH) restricted",
+				"Remote Login is enabled — verify this is intentional",
+				SeverityMedium)
+		}
+		return
+	}
+
+	// Fallback: check if the sshd job is loaded via launchctl.
+	// This works better under sudo.
+	launchRes := exec.Run("launchctl", "list", "com.openssh.sshd")
+	if launchRes.Success() {
+		// If the job is listed, Remote Login is effectively enabled.
+		b.Warn("MACOS-005", "Remote Login (SSH) restricted",
+			"Remote Login appears to be enabled (detected via launchctl)",
 			SeverityMedium)
 		return
 	}
-	lower := strings.ToLower(out)
-	if strings.Contains(lower, "off") {
-		b.Pass("MACOS-005", "Remote Login (SSH) restricted",
-			"Remote Login is Off", SeverityMedium)
-	} else {
-		b.Warn("MACOS-005", "Remote Login (SSH) restricted",
-			"Remote Login is enabled — verify this is intentional",
-			SeverityMedium)
-	}
+
+	// Still can't tell.
+	b.Skip("MACOS-005", "Remote Login (SSH) restricted",
+		"Could not determine Remote Login state (systemsetup requires a non-root admin session; launchctl fallback also inconclusive)",
+		SeverityMedium)
 }
 
 // macos006ScreenSharing — Screen sharing service.

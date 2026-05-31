@@ -114,6 +114,51 @@ type Analysis struct {
 	Skipped         bool
 }
 
+// CheckSummary is a condensed view of one scan check for prompt construction.
+type CheckSummary struct {
+	ID       string
+	Severity string
+	Detail   string
+}
+
+// CVESummary is a condensed view of one known CVE for prompt construction.
+type CVESummary struct {
+	ID       string
+	Severity string
+	Desc     string
+}
+
+// ScanContext contains all scan data needed to build a rich AI prompt.
+// Main populates this from the live scan result types; the ai package
+// does not import scan/openclaw/threat to avoid coupling.
+type ScanContext struct {
+	Platform       string
+	OpenPorts      []string
+	PendingUpdates int
+
+	// System hardening — failing/warning checks only, all categories
+	FailingChecks []CheckSummary
+
+	// OpenClaw audit findings (from openclaw security audit)
+	OCFindings []CheckSummary
+
+	// OpenClaw version and known CVE counts for that version
+	OCVersion   string
+	OCCVEHigh   int
+	OCCVEMedium int
+	OCCVELow    int
+	OCTopCVEs   []CVESummary // up to 10 high/critical entries
+
+	// Threat intelligence
+	ShodanPorts []string
+	ShodanCVEs  []string
+	ShodanTags  []string
+	AbuseScore  int
+	AbuseHasKey bool
+	HasIoC      bool
+	IoCItems    []string // up to 5 notable IoC findings
+}
+
 var noProviderRemediation = strings.TrimSpace(`
 No AI provider available. To enable AI analysis, either:
   • Install Ollama and start it locally (free, private): https://ollama.com — then run: ollama serve
@@ -221,36 +266,117 @@ func Analyze(ctx context.Context, prompt string, skip bool, provider Provider) A
 	return parseResponse(raw, provider)
 }
 
-// BuildPrompt constructs the AI analysis prompt from a simplified scan summary.
-func BuildPrompt(platform string, openPorts []string, pendingUpdates int, priorityCount int) (string, error) {
-	summary := map[string]any{
-		"platform":             platform,
-		"open_ports":           openPorts,
-		"pending_update_count": pendingUpdates,
-		"priority_findings":    priorityCount,
-	}
-	summaryJSON, err := json.MarshalIndent(summary, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("buildPrompt: marshal: %w", err)
-	}
-	return fmt.Sprintf(`You are a senior %s security engineer reviewing an automated host hardening scan.
+// BuildPrompt constructs a rich, OpenClaw-focused AI prompt from full scan data.
+func BuildPrompt(sc ScanContext) (string, error) {
+	var b strings.Builder
 
-SCAN DATA:
-%s
+	b.WriteString("You are a security analyst specialising in AI agent deployments. ")
+	b.WriteString("You are reviewing an automated security scan of a live OpenClaw deployment.\n\n")
 
-Respond ONLY with a valid JSON object (no markdown, no explanation) in this exact schema:
-{
-  "risk_score": <integer 1-10, where 10 is most dangerous>,
-  "overview": "<2-4 sentence plain-English summary>",
-  "risks": ["<risk #1>", "<risk #2>"],
-  "recommendations": ["<fix #1>", "<fix #2>"]
+	b.WriteString("BACKGROUND: OpenClaw is an AI gateway/runtime that connects AI models to powerful tools ")
+	b.WriteString("(shell execution, filesystem access, browser control, external APIs). ")
+	b.WriteString("Misconfigurations create prompt-injection attack surfaces that can escalate to ")
+	b.WriteString("arbitrary command execution or data exfiltration. Many risks are OpenClaw-specific ")
+	b.WriteString("and will not appear in generic host hardening scanners.\n\n")
+
+	// Deployment header
+	b.WriteString("── DEPLOYMENT ─────────────────────────────────────────────────────────────\n")
+	b.WriteString(fmt.Sprintf("Platform:        %s\n", sc.Platform))
+	if sc.OCVersion != "" {
+		b.WriteString(fmt.Sprintf("OpenClaw:        %s\n", sc.OCVersion))
+	}
+	b.WriteString(fmt.Sprintf("Open ports:      %d  %s\n", len(sc.OpenPorts), joinOrNone(sc.OpenPorts)))
+	b.WriteString(fmt.Sprintf("Pending updates: %d\n\n", sc.PendingUpdates))
+
+	// OpenClaw audit findings
+	if len(sc.OCFindings) > 0 {
+		b.WriteString(fmt.Sprintf("── OPENCLAW AUDIT (%d findings) ────────────────────────────────────────────\n", len(sc.OCFindings)))
+		for _, f := range sc.OCFindings {
+			b.WriteString(fmt.Sprintf("[%-8s] %-40s %s\n", strings.ToUpper(f.Severity), f.ID, f.Detail))
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString("── OPENCLAW AUDIT ──────────────────────────────────────────────────────────\n")
+		b.WriteString("No OpenClaw audit findings (openclaw not installed or audit skipped).\n\n")
+	}
+
+	// Known CVEs for this version
+	if sc.OCVersion != "" && (sc.OCCVEHigh+sc.OCCVEMedium+sc.OCCVELow > 0) {
+		b.WriteString(fmt.Sprintf("── KNOWN CVEs FOR INSTALLED VERSION (%dH / %dM / %dL) ────────────────────────\n",
+			sc.OCCVEHigh, sc.OCCVEMedium, sc.OCCVELow))
+		for _, cve := range sc.OCTopCVEs {
+			b.WriteString(fmt.Sprintf("[%-8s] %-20s %s\n", strings.ToUpper(cve.Severity), cve.ID, cve.Desc))
+		}
+		if len(sc.OCTopCVEs) < sc.OCCVEHigh+sc.OCCVEMedium+sc.OCCVELow {
+			b.WriteString(fmt.Sprintf("... and %d additional medium/low advisories (upgrade resolves all)\n",
+				sc.OCCVEHigh+sc.OCCVEMedium+sc.OCCVELow-len(sc.OCTopCVEs)))
+		}
+		b.WriteString("\n")
+	} else if sc.OCVersion != "" {
+		b.WriteString("── KNOWN CVEs ──────────────────────────────────────────────────────────────\n")
+		b.WriteString("No known CVEs for this OpenClaw version.\n\n")
+	}
+
+	// System hardening gaps
+	if len(sc.FailingChecks) > 0 {
+		b.WriteString(fmt.Sprintf("── SYSTEM HARDENING GAPS (%d failing/warning checks) ───────────────────────\n", len(sc.FailingChecks)))
+		for _, f := range sc.FailingChecks {
+			b.WriteString(fmt.Sprintf("[%-8s] %-12s %s\n", strings.ToUpper(f.Severity), f.ID, f.Detail))
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString("── SYSTEM HARDENING ────────────────────────────────────────────────────────\n")
+		b.WriteString("All system hardening checks passed.\n\n")
+	}
+
+	// Threat intelligence
+	b.WriteString("── THREAT INTELLIGENCE ─────────────────────────────────────────────────────\n")
+	if len(sc.ShodanCVEs) > 0 {
+		b.WriteString(fmt.Sprintf("Shodan CVEs for public IP: %s\n", strings.Join(sc.ShodanCVEs, ", ")))
+	} else if len(sc.ShodanPorts) > 0 {
+		b.WriteString(fmt.Sprintf("Shodan open ports: %s  (no CVEs flagged)\n", strings.Join(sc.ShodanPorts, ", ")))
+	} else {
+		b.WriteString("Shodan: no findings for public IP\n")
+	}
+	if sc.AbuseHasKey {
+		b.WriteString(fmt.Sprintf("AbuseIPDB score: %d/100\n", sc.AbuseScore))
+	} else {
+		b.WriteString("AbuseIPDB: skipped (no API key)\n")
+	}
+	if sc.HasIoC {
+		b.WriteString("Local IoC: FINDINGS DETECTED\n")
+		for _, item := range sc.IoCItems {
+			b.WriteString(fmt.Sprintf("  • %s\n", item))
+		}
+	} else {
+		b.WriteString("Local IoC: clean\n")
+	}
+	b.WriteString("\n")
+
+	// Instructions
+	b.WriteString("── ANALYSIS REQUEST ────────────────────────────────────────────────────────\n")
+	b.WriteString("Analyse this specific deployment. Prioritise OpenClaw-specific risks over generic host hardening advice.\n")
+	b.WriteString("Focus on:\n")
+	b.WriteString("1. Configuration risks specific to this OpenClaw setup (channel policies, tool permissions, trust boundaries)\n")
+	b.WriteString("2. Exploit potential of the outstanding CVEs given this observed configuration\n")
+	b.WriteString("3. How system hardening gaps increase OpenClaw's attack surface\n")
+	b.WriteString("\nRespond ONLY with a valid JSON object — no markdown fencing, no explanation outside the JSON:\n")
+	b.WriteString("{\n")
+	b.WriteString(`  "risk_score": <integer 1-10, where 10 is critical>,` + "\n")
+	b.WriteString(`  "overview": "<2-4 sentences on OpenClaw deployment risk — not generic host hardening>",` + "\n")
+	b.WriteString(`  "risks": ["<specific risk>", ...],` + "\n")
+	b.WriteString(`  "recommendations": ["<prioritised fix, highest impact first>", ...]` + "\n")
+	b.WriteString("}\n")
+
+	return b.String(), nil
 }
 
-Rules:
-- risks and recommendations may be empty arrays [] if there are genuinely none.
-- overview must always be present and non-empty.
-- Do not suggest specific shell commands to run.
-`, platform, string(summaryJSON)), nil
+// joinOrNone returns a comma-joined string or "(none)" for an empty slice.
+func joinOrNone(ss []string) string {
+	if len(ss) == 0 {
+		return "(none)"
+	}
+	return "(" + strings.Join(ss, ", ") + ")"
 }
 
 // validateExternalAPIURL checks that rawURL is HTTPS and that its hostname
@@ -375,7 +501,7 @@ func callClaude(ctx context.Context, prompt string) (string, error) {
 	}
 	payload := map[string]any{
 		"model":      model,
-		"max_tokens": 768,
+		"max_tokens": 1500,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -444,7 +570,7 @@ func callOpenAI(ctx context.Context, prompt, model, key, baseURL string) (string
 	}
 	payload := map[string]any{
 		"model":      model,
-		"max_tokens": 768,
+		"max_tokens": 1500,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},

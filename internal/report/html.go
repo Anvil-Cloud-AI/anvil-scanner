@@ -273,7 +273,7 @@ func renderHTML(d Data) string {
 	}
 
 	// Extended Hardening Checks
-	extHTML := renderExtendedChecks(d.Checks)
+	extHTML := renderExtendedChecks(d.Checks, d.Platform, d.RemoteLogin)
 
 	// AI section
 	aiHTML := renderAISection(d.Analysis)

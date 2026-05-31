@@ -75,31 +75,122 @@ func SSHEnabled(platform string, remoteLoginEnabled *bool) bool {
 	return remoteLoginEnabled == nil || *remoteLoginEnabled
 }
 
-// GetSSHDirectives reads /etc/ssh/sshd_config and returns a case-folded
-// directive→value map for use in report rendering.  The "_error" key is set
-// when the file cannot be read (e.g. permission denied without root).
-func GetSSHDirectives() map[string]string { return parseSshdConfig() }
+// GetSSHDirectives returns a case-folded directive→value map for the
+// SSH Configuration table in the report.
+func GetSSHDirectives() map[string]string {
+	// On macOS we avoid the noisy multi-probe sshd -T dance (which often
+	// triggers repeated sudo prompts and isn't very useful anyway).
+	// We just parse the main file directly. The report layer already
+	// explains the limitations when Remote Login state is unknown.
+	if runtime.GOOS == "darwin" {
+		return parseSshdConfig()
+	}
 
-// parseSshdConfig reads /etc/ssh/sshd_config and returns a
-// case-folded directive→value map. Comments and blank lines are
-// ignored. Returns a map with key "_error" if the file cannot be
-// read, matching the Python reference behavior.
+	// On Linux we try hard to get the effective config via sshd -T because
+	// of heavy use of /etc/ssh/sshd_config.d/ Includes on modern distros.
+	if cfg := getEffectiveSSHDirectivesViaSSHDMinusT(); cfg != nil && cfg["_sshd_t_error"] == "" {
+		return cfg
+	}
+	return parseSshdConfig()
+}
+
+// getEffectiveSSHDirectivesViaSSHDMinusT attempts to run `sshd -T` (non-elevated,
+// then elevated) to obtain the true runtime configuration. Returns nil if it
+// cannot be obtained (caller should fall back).
+//
+// It tries common full paths because on many Linux distributions (especially
+// Ubuntu/Debian) `sshd` lives in /usr/sbin which is often not in a normal
+// user's PATH.
+func getEffectiveSSHDirectivesViaSSHDMinusT() map[string]string {
+	candidates := []string{"sshd", "/usr/sbin/sshd", "/usr/bin/sshd", "/sbin/sshd"}
+
+	// Try both bare -T and with explicit config file.
+	argsVariants := [][]string{
+		{"-T"},
+		{"-T", "-f", "/etc/ssh/sshd_config"},
+	}
+
+	alreadyRoot := os.Getuid() == 0
+
+	for _, bin := range candidates {
+		for _, args := range argsVariants {
+			// Try as current user first.
+			res := exec.Run(bin, args...)
+			if res.Success() && strings.TrimSpace(res.Stdout) != "" {
+				return parseSSHDMinusTOutput(res.Stdout)
+			}
+
+			// Only try elevated if we're not already root (avoids pointless sudo prompts).
+			if !alreadyRoot {
+				res = exec.RunElevated(bin, args...)
+				if res.Success() && strings.TrimSpace(res.Stdout) != "" {
+					return parseSSHDMinusTOutput(res.Stdout)
+				}
+			}
+		}
+	}
+
+	return map[string]string{
+		"_sshd_t_error": "Could not get effective config via sshd -T. Falling back to reading main sshd_config only.",
+	}
+}
+
+// parseSSHDMinusTOutput turns the stdout of `sshd -T` into a directive map.
+func parseSSHDMinusTOutput(output string) map[string]string {
+	result := map[string]string{}
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexAny(line, " \t")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(line[:idx]))
+		val := strings.TrimSpace(line[idx+1:])
+		if key != "" {
+			result[key] = val
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// parseSshdConfig is the fallback parser that reads only /etc/ssh/sshd_config
+// directly. It is used when `sshd -T` cannot be executed.
+//
+// It detects Include directives and Match blocks and records warnings in
+// "_include" and "_match" keys (used by the report renderer).
 func parseSshdConfig() map[string]string {
 	result := map[string]string{}
-	f, err := os.Open(sshdConfigPath)
+
+	data, err := os.ReadFile(sshdConfigPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			result["_error"] = "sshd_config not found"
-		} else {
-			result["_error"] = "Permission denied reading sshd_config (try sudo)"
+			return result
 		}
-		return result
+		if os.IsPermission(err) {
+			// Retry with sudo so non-root runs can still inspect the config.
+			elevated, elevErr := exec.ReadFileElevated(sshdConfigPath)
+			if elevErr != nil {
+				result["_error"] = "Permission denied reading sshd_config — re-run with sudo"
+				return result
+			}
+			data = elevated
+		} else {
+			result["_error"] = fmt.Sprintf("read error: %v", err)
+			return result
+		}
 	}
-	defer f.Close()
 
 	hasIncludes := false
 	inMatchBlock := false
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		raw := scanner.Text()
 		line := strings.TrimSpace(raw)
