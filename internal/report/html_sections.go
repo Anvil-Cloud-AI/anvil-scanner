@@ -49,14 +49,7 @@ func renderSSHConfig(d Data, platform string) string {
 	if isMacOS && d.RemoteLogin != nil && !*d.RemoteLogin {
 		return `<tr><td>Remote Login (SSH)</td><td>🟢 <code>disabled</code> — SSH server is off on this Mac (System Settings → General → Sharing → Remote Login)</td></tr>`
 	}
-	// If sshd_config couldn't be read, surface the reason instead of showing
-	// "unknown" for every directive — the _error key explains why.
-	if errMsg, ok := d.SSHDirectives["_error"]; ok {
-		return fmt.Sprintf(
-			`<tr><td colspan="2" style="color:#94a3b8;font-size:.83rem;">⚠ %s</td></tr>`,
-			e(errMsg),
-		)
-	}
+
 	safe := map[string][]string{
 		"PermitRootLogin":        {"no", "prohibit-password"},
 		"PasswordAuthentication": {"no"},
@@ -79,6 +72,36 @@ func renderSSHConfig(d Data, platform string) string {
 		}
 		return fmt.Sprintf(`<tr><td>%s</td><td>%s <code>%s</code></td></tr>`, e(directive), dot, e(val))
 	}
+
+	// If sshd_config couldn't be read, surface the reason.
+	if errMsg, ok := d.SSHDirectives["_error"]; ok {
+		return fmt.Sprintf(
+			`<tr><td colspan="2" style="color:#94a3b8;font-size:.83rem;">⚠ %s</td></tr>`,
+			e(errMsg),
+		)
+	}
+
+	// Diagnostic from sshd -T failure (new in recent versions) — show it + still render the rows.
+	if diag, ok := d.SSHDirectives["_sshd_t_error"]; ok {
+		rows := ""
+		if includeMsg, ok := d.SSHDirectives["_include"]; ok {
+			rows += fmt.Sprintf(
+				`<tr><td colspan="2" style="color:#d97706;font-size:.83rem;">⚠ %s</td></tr>`,
+				e(includeMsg),
+			)
+		}
+		rows += fmt.Sprintf(
+			`<tr><td colspan="2" style="color:#94a3b8;font-size:.83rem;">ℹ %s</td></tr>`,
+			e(diag),
+		)
+		rows += sshRow("PermitRootLogin") + sshRow("PasswordAuthentication")
+		if isMacOS && d.RemoteLogin != nil && *d.RemoteLogin {
+			rows = `<tr><td>Remote Login (SSH)</td><td>🟡 <code>enabled</code> — SSH server is on; directives below apply.</td></tr>` + rows
+		}
+		return rows
+	}
+
+	// Normal path
 	rows := sshRow("PermitRootLogin") + sshRow("PasswordAuthentication")
 	if isMacOS && d.RemoteLogin != nil && *d.RemoteLogin {
 		rows = `<tr><td>Remote Login (SSH)</td><td>🟡 <code>enabled</code> — SSH server is on; directives below apply.</td></tr>` + rows

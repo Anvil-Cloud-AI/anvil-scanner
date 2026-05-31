@@ -102,21 +102,33 @@ func GetSSHDirectives() map[string]string {
 func getEffectiveSSHDirectivesViaSSHDMinusT() map[string]string {
 	candidates := []string{"sshd", "/usr/sbin/sshd", "/usr/bin/sshd", "/sbin/sshd"}
 
-	for _, bin := range candidates {
-		// Try non-elevated first.
-		res := exec.Run(bin, "-T")
-		if res.Success() && strings.TrimSpace(res.Stdout) != "" {
-			return parseSSHDMinusTOutput(res.Stdout)
-		}
+	// Try both bare -T and with explicit config file (some systems need this).
+	argsVariants := [][]string{
+		{"-T"},
+		{"-T", "-f", "/etc/ssh/sshd_config"},
+	}
 
-		// Then try with sudo.
-		res = exec.RunElevated(bin, "-T")
-		if res.Success() && strings.TrimSpace(res.Stdout) != "" {
-			return parseSSHDMinusTOutput(res.Stdout)
+	for _, bin := range candidates {
+		for _, args := range argsVariants {
+			// Try as current user (works if already root or sshd in PATH).
+			res := exec.Run(bin, args...)
+			if res.Success() && strings.TrimSpace(res.Stdout) != "" {
+				return parseSSHDMinusTOutput(res.Stdout)
+			}
+
+			// Try elevated (sudo).
+			res = exec.RunElevated(bin, args...)
+			if res.Success() && strings.TrimSpace(res.Stdout) != "" {
+				return parseSSHDMinusTOutput(res.Stdout)
+			}
 		}
 	}
 
-	return nil
+	// All attempts failed — return a diagnostic map so the report can explain why.
+	// The caller (parseSshdConfig) will still run and may set _include.
+	return map[string]string{
+		"_sshd_t_error": "Could not get effective config via sshd -T (tried multiple paths and -f variants, both direct and via sudo). Falling back to reading main sshd_config only.",
+	}
 }
 
 // parseSSHDMinusTOutput turns the stdout of `sshd -T` into a directive map.
