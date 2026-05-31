@@ -14,6 +14,45 @@ Every entry records: date, scope, toolchain, findings by severity, and fix refer
 
 ---
 
+## 2026-05-31 — Periodic deep security review & hardening pass (post-v1.0.0)
+
+**Type:** Periodic
+
+**Date:** 2026-05-31
+
+**Scope:** Full manual deep security audit of the entire codebase (main branch, post v1.0.0) against the project's own five core security rules (AGENTS.md / CLAUDE.md) plus the standard automated SAST suite. Review covered all subprocess execution, file I/O boundaries, outbound HTTP, privileged uninstall/revert paths, secret handling, HTML output, and centralization of security primitives. Triggered by explicit request for comprehensive review after the initial public release stabilized.
+
+**Toolchain:**
+- `go test -race ./...` (full matrix, clean)
+- `go vet ./...` (clean)
+- `staticcheck ./...` (via normal CI gates on main — clean prior to this pass)
+- `gosec` (via CI + manual review of all remaining `#nosec` / `//nolint` sites)
+- `govulncheck ./...` (via CI — no vulnerable call-graph paths)
+- `semgrep` (p/golang + p/owasp-top-ten + p/secrets, via CI)
+- Extensive manual code review, data-flow tracing for SSRF/TOCTOU/privilege boundaries, and cross-package consistency audit
+
+**Results:**
+- All automated CI gates green on main at start of review.
+- Manual deep review identified 3 high-severity gaps and multiple medium items not caught by SAST tools (primarily around privileged best-effort paths and duplicated security boundary logic):
+  - **High:** Raw `os/exec.Command` + direct `os.ReadFile`/`os.WriteFile`/`os.Remove` in uninstall paths (`internal/backup/backup.go`: `removeFirewallRules`, `reloadSSHD`). These bypassed all five project security rules on privileged cleanup code.
+  - **High:** `TelemetryClient` in `internal/safehttp` documented as SSRF-guarded but actually instantiated an unguarded `*http.Transport`.
+  - **High/Medium:** Large duplicated `ssrfSafeTransport` + private-IP CIDR logic in `internal/ai/ai.go` (plus stray `webintel.go` community intel fetch code that had been accidentally committed).
+- Numerous lower-severity consistency and defense-in-depth issues also addressed (see remediation summary).
+- Zero unreviewed high-severity findings after remediation. All changes followed TDD where new logic was added and full `-race` / `go vet` verification.
+
+**Remediation summary:**
+- Created `internal/safehttp` package as the single source of truth for outbound HTTP clients: `SafeClient`, `LocalhostOnlyClient` (strict for Ollama), `TelemetryClient`, and `IsPrivateIP` with dial-time `net.Dialer.Control` enforcement. Migrated every call site (ai providers, threat intel feeds, OpenClaw, telemetry, schedule).
+- Fully migrated uninstall/revert privileged operations in `internal/backup` to `internal/exec` helpers (`RunElevated`, `ReadFileElevated`, `WriteFileElevated` with atomic temp+rename). Added `io.LimitReader` guard to `loadManifest`.
+- Deleted ~80 lines of duplicated transport code from `internal/ai`; removed the stray webintel fetch entirely.
+- Earlier rounds in the same cycle (fail2ban post-restart polling, authoritative `sshd -T` effective config, macOS `socketfilterfw` firewall detection, launchctl fallback for Remote Login, etc.) also landed with corresponding test and report updates.
+- All HTML external data continues to use `html.EscapeString`; all config writes remain atomic; all file reads bounded.
+
+**Fix commits:** Multiple security-hardening PRs and direct main-line commits, May 2026 (safehttp centralization, backup uninstall migration, AI transport cleanup, plus supporting SSH/macOS/fail2ban robustness work). Full history available via `git log --since="2026-05-01"`.
+
+**Notes:** This pass deliberately touched "working" privileged paths (uninstall) knowing it would require a full re-test cycle on Ubuntu (sudo) + macOS. Post-fix manual testing on both platforms is required before the next release tag.
+
+---
+
 ## 2026-05-06 — Release v1.0.0 (initial public release)
 
 **Type:** Release

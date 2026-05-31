@@ -24,6 +24,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/safehttp"
 )
 
 // Provider identifies an AI provider.
@@ -520,7 +522,8 @@ func callClaude(ctx context.Context, prompt string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", key)
 	req.Header.Set("anthropic-version", "2023-06-01")
-	client := &http.Client{Transport: ssrfSafeTransport}
+	// Use the centralized SSRF-safe client.
+	client := safehttp.SafeClient(providerCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("claude request failed: %w", err)
@@ -588,7 +591,8 @@ func callOpenAI(ctx context.Context, prompt, model, key, baseURL string) (string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
-	resp, err := (&http.Client{Transport: ssrfSafeTransport}).Do(req)
+	// Use the centralized SSRF-safe client.
+	resp, err := safehttp.SafeClient(providerCallTimeout).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("API request failed: %w", err)
 	}
