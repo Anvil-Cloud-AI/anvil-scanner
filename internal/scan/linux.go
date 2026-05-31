@@ -69,7 +69,11 @@ func f2b001Fail2ban(b *CheckBuilder) {
 // dependent on ufw being active and are silently skipped otherwise,
 // matching the Python reference behavior.
 func fw001Firewall(b *CheckBuilder) (ufwActive bool, ufwOut string) {
-	ufwRes := exec.Run("ufw", "status")
+	// `ufw status verbose` is required to see the default policy line
+	// ("Default: deny (incoming), allow (outgoing), ...").  Plain `ufw status`
+	// only shows active/inactive and rules — FW-002 has no chance of passing
+	// without the verbose output.
+	ufwRes := exec.Run("ufw", "status", "verbose")
 
 	if ufwRes.Success() {
 		if strings.Contains(ufwRes.Stdout, "Status: active") {
