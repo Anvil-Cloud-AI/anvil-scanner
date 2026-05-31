@@ -86,16 +86,16 @@ For long-lived or headless setups, encrypt keys at rest instead:
 
 ```bash
 # First-time setup — interactive wizard
-sudo anvil-scanner --init-secrets
+anvil-scanner --init-secrets
 
 # Encrypt a .env file into the container
-sudo anvil-scanner --encrypt /path/to/.env
+anvil-scanner --encrypt /path/to/.env
 
 # Decrypt to inspect or edit
-sudo anvil-scanner --decrypt /tmp/secrets-check.env
+anvil-scanner --decrypt /tmp/secrets-check.env
 
 # Move to a different backend later
-sudo anvil-scanner --rotate-key-backend keyring
+anvil-scanner --rotate-key-backend keyring
 ```
 
 **Key backends:**
@@ -108,20 +108,21 @@ sudo anvil-scanner --rotate-key-backend keyring
 
 ---
 
-## Running with sudo
+## Privilege escalation
 
-Most operations require **sudo** — scanning reads system files (`/etc/ssh/sshd_config`, kernel parameters) and hardening modifies firewall rules and SSH config.
+**Run Anvil Scanner as your regular user — not with sudo.**
 
-> When run with sudo, Anvil Scanner detects the real user via `SUDO_USER` and writes reports and backups to your home directory, not `/root`. Report files are chowned back to your user.
+The scanner warns when invoked as root and some checks behave incorrectly under sudo (see macOS note below). Checks that need root access and don't have it show `SKIP`, which is expected.
 
-| Operation | Needs sudo | Why |
-|-----------|-----------|-----|
-| `--scan` (full) | Yes | Reads `/etc/shadow`, `/etc/ssh/sshd_config`, kernel parameters |
-| `--revert` / `--uninstall` | Yes | Restores system files |
-| `--schedule` / `--unschedule` | No | Installs to your user crontab / launchd user agent |
-| Threat intel (default on) | No | Network lookups only |
+| Operation | How privileges are handled |
+|-----------|---------------------------|
+| Scan (default) | Run as your user. Root-only checks (`/etc/shadow`, kernel parameters) show `SKIP` if not elevated — that's fine for most use cases. |
+| `--harden` | Run as your user. The tool prompts for your password when it needs to modify system files. |
+| `--revert` / `--uninstall` | Run with `sudo` — these restore files to system paths and require root. |
+| `--schedule` / `--unschedule` | No elevation needed — installs to your user crontab or launchd agent. |
+| Threat intel | No elevation needed — network lookups only. |
 
-Running without sudo still produces a partial scan; checks that need root show `SKIP`.
+**macOS note:** The Remote Login check (`MACOS-005`) uses `systemsetup`, which must run as an admin user in a normal session — it fails when invoked as root via `sudo`. If you run the scanner with `sudo`, MACOS-005 will be skipped and SSH checks will run regardless of whether Remote Login is actually enabled, producing findings for an SSH server that may not be running. Running without `sudo` avoids this.
 
 ---
 
@@ -129,25 +130,28 @@ Running without sudo still produces a partial scan; checks that need root show `
 
 ```bash
 # Full scan — host + OpenClaw + threat intelligence + AI analysis (most common)
-sudo anvil-scanner
+anvil-scanner
 
 # Skip threat intelligence
-sudo anvil-scanner --no-threat-intel
+anvil-scanner --no-threat-intel
 
 # Skip AI analysis
-sudo anvil-scanner --no-ai
+anvil-scanner --no-ai
 
 # Skip OpenClaw audit
-sudo anvil-scanner --no-openclaw
+anvil-scanner --no-openclaw
 
 # Write HTML report to a specific path
-sudo anvil-scanner --html /tmp/report.html
+anvil-scanner --html /tmp/report.html
 
 # Write JSON report to a specific path
-sudo anvil-scanner --json-output /tmp/report.json
+anvil-scanner --json-output /tmp/report.json
 
 # Print JSON report to stdout (for piping)
-sudo anvil-scanner --json
+anvil-scanner --json
+
+# Apply hardening fixes (prompts for password when needed)
+anvil-scanner --harden
 
 # Schedule hourly scan
 anvil-scanner --schedule
@@ -164,20 +168,18 @@ sudo anvil-scanner --revert
 # Remove all anvil-scanner changes and backups
 sudo anvil-scanner --uninstall
 
+# Force uninstall even when no backups found
+sudo anvil-scanner --uninstall --force
+
 # Send anonymised scan summary to Anvil telemetry (opt-in)
-sudo anvil-scanner --telemetry
+anvil-scanner --telemetry
 
 # Print version
 anvil-scanner --version
 
-# Force uninstall even when no backups found
-sudo anvil-scanner --uninstall --force
-
-# Copy secrets from container into individual OS keyring entries
-sudo anvil-scanner --store-keyring
-
-# Specify key backend for --init-secrets / --encrypt
-sudo anvil-scanner --init-secrets --backend keyring
+# Secrets management (run as your normal user — keyring backend requires a non-root session)
+anvil-scanner --init-secrets --backend keyring
+anvil-scanner --store-keyring
 ```
 
 ---

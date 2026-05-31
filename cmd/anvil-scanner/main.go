@@ -174,6 +174,18 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 
+	// Warm sudo credentials once before the scan so checks that read
+	// privileged files (sshd_config, /etc/shadow, ufw status, etc.) can
+	// call RunElevated without needing a TTY mid-scan.  sudo -v is a
+	// no-op when already root or when NOPASSWD is configured.
+	if os.Getuid() != 0 {
+		fmt.Fprintln(progress, "Some checks need elevated access — you may be prompted for your password.")
+		if err := iexec.WarmSudoCredentials(); err != nil {
+			fmt.Fprintln(os.Stderr, "⚠  Could not obtain sudo credentials — checks requiring root will show SKIP.")
+		}
+		fmt.Fprintln(progress)
+	}
+
 	// Hardening checks
 	b := scan.NewBuilder(scan.WithClock(func() time.Time { return time.Now().UTC() }))
 	scan.RunAllChecksInto(b)
@@ -186,10 +198,25 @@ func run(ctx context.Context, args []string) error {
 
 	if *doHarden {
 		if os.Getuid() != 0 {
-			fmt.Fprintln(progress, "\nHardening needs sudo for some operations — you may be prompted for your password.")
+			// Re-warm in case the sudo ticket expired during a long scan.
 			if err := iexec.WarmSudoCredentials(); err != nil {
-				fmt.Fprintln(os.Stderr, "Error: could not obtain sudo credentials — re-run with sudo or grant NOPASSWD")
+				fmt.Fprintln(os.Stderr, "Error: could not obtain sudo credentials for hardening — check your sudo access")
 				return nil
+			}
+		}
+		// On macOS, warn when Remote Login state is unknown (MACOS-005 SKIPped).
+		// This happens when the scanner runs under sudo — systemsetup requires a
+		// non-root admin session. SSH hardening still writes sshd_config, which is
+		// harmless if Remote Login is off, but will take effect if it is ever enabled.
+		if scan.Platform() == "Darwin" {
+			for _, c := range result.Checks {
+				if string(c.ID) == "MACOS-005" && c.Status == scan.StatusSkip {
+					fmt.Fprintln(progress, "\n⚠  Note: Remote Login (SSH server) state could not be verified on this Mac.")
+					fmt.Fprintln(progress, "   SSH config changes will be written to /etc/ssh/sshd_config.")
+					fmt.Fprintln(progress, "   They are harmless if Remote Login is disabled, but will take effect if you enable it.")
+					fmt.Fprintln(progress, "   Re-run without sudo to detect Remote Login state automatically.")
+					break
+				}
 			}
 		}
 		fmt.Fprintln(progress, "\nApplying hardening fixes...")

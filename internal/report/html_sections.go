@@ -93,7 +93,9 @@ func renderSSHConfig(d Data, platform string) string {
 }
 
 // renderExtendedChecks renders the Extended Hardening Checks section.
-func renderExtendedChecks(checks []scan.Check) string {
+// platform and remoteLogin are used to annotate the SSH section on macOS
+// when Remote Login state could not be determined.
+func renderExtendedChecks(checks []scan.Check, platform string, remoteLogin *bool) string {
 	if len(checks) == 0 {
 		return ""
 	}
@@ -167,11 +169,25 @@ func renderExtendedChecks(checks []scan.Check) string {
 			e(label), rows,
 		)
 
-		// Quick-fix hint for SSH failures
+		// Quick-fix hint and contextual notes for SSH findings.
 		if prefix == "SSH" {
+			// On macOS, when Remote Login state is unknown (nil), SSH checks ran
+			// conservatively because the scanner couldn't confirm Remote Login was off
+			// (typically because systemsetup requires a non-root admin session).
+			// Surface this so users understand why SSH findings appear on a Mac
+			// that may not be running sshd.
+			if strings.EqualFold(platform, "darwin") && remoteLogin == nil {
+				catTable = `<div style="background:#0f1f30;border:1px solid #1e3a5f;border-left:3px solid #5fb4ff;border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:10px;font-size:.85rem;color:#93c5fd;">` +
+					`ℹ <strong>Remote Login status unknown</strong> — SSH checks ran as a precaution because the scanner could not verify whether Remote Login (SSH server) is enabled on this Mac. ` +
+					`These findings only apply if Remote Login is on. Re-run <em>without</em> <code>sudo</code> to detect this automatically.</div>` + catTable
+			}
+			restartCmd := "sudo sshd -t &amp;&amp; sudo systemctl restart sshd"
+			if strings.EqualFold(platform, "darwin") {
+				restartCmd = "sudo sshd -t &amp;&amp; sudo launchctl kickstart -k system/com.openssh.sshd"
+			}
 			catTable += `<div style="background:#1c1917;border:1px solid #44403c;border-radius:8px;padding:14px 18px;margin-top:8px;">` +
 				`<p style="color:#94a3b8;margin:0 0 8px;">Fix SSH findings — back up first, then edit sshd_config:</p>` +
-				`<code style="display:block;background:#0f172a;padding:10px 14px;border-radius:6px;color:#7dd3fc;font-size:.9rem;white-space:pre;">sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak&#10;sudo $EDITOR /etc/ssh/sshd_config&#10;sudo sshd -t &amp;&amp; sudo systemctl restart sshd</code>` +
+				`<code style="display:block;background:#0f172a;padding:10px 14px;border-radius:6px;color:#7dd3fc;font-size:.9rem;white-space:pre;">sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak&#10;sudo $EDITOR /etc/ssh/sshd_config&#10;` + restartCmd + `</code>` +
 				`<p style="color:#64748b;font-size:.8rem;margin:8px 0 0;">Use the <em>How to fix</em> links above for each setting. <code>sshd -t</code> validates config before restart.</p></div>`
 		}
 		if prefix == "RPI" {
