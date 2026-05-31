@@ -75,15 +75,65 @@ func SSHEnabled(platform string, remoteLoginEnabled *bool) bool {
 	return remoteLoginEnabled == nil || *remoteLoginEnabled
 }
 
-// GetSSHDirectives reads /etc/ssh/sshd_config and returns a case-folded
-// directive→value map for use in report rendering.  The "_error" key is set
-// when the file cannot be read (e.g. permission denied without root).
-func GetSSHDirectives() map[string]string { return parseSshdConfig() }
+// GetSSHDirectives returns a case-folded directive→value map for the
+// SSH Configuration table in the report.
+//
+// It prefers `sshd -T` output (when available) because it reflects the
+// *effective* configuration after processing all Include directives and
+// drop-in files (the common situation on modern Ubuntu/Debian). This makes
+// the report accurate even when settings live in /etc/ssh/sshd_config.d/.
+//
+// Falls back to parsing /etc/ssh/sshd_config directly if `sshd -T` cannot
+// be run (older systems, macOS without sshd in PATH, permission issues, etc.).
+func GetSSHDirectives() map[string]string {
+	if cfg := getEffectiveSSHDirectivesViaSSHDMinusT(); cfg != nil {
+		return cfg
+	}
+	return parseSshdConfig()
+}
 
-// parseSshdConfig reads /etc/ssh/sshd_config and returns a
-// case-folded directive→value map. Comments and blank lines are
-// ignored. Returns a map with key "_error" if the file cannot be
-// read, matching the Python reference behavior.
+// getEffectiveSSHDirectivesViaSSHDMinusT attempts to run `sshd -T` (non-elevated,
+// then elevated) to obtain the true runtime configuration. Returns nil if it
+// cannot be obtained (caller should fall back).
+func getEffectiveSSHDirectivesViaSSHDMinusT() map[string]string {
+	result := map[string]string{}
+
+	// Try without sudo first (works on some systems or when already root).
+	res := exec.Run("sshd", "-T")
+	if !res.Success() || strings.TrimSpace(res.Stdout) == "" {
+		res = exec.RunElevated("sshd", "-T")
+	}
+	if !res.Success() || strings.TrimSpace(res.Stdout) == "" {
+		return nil
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(res.Stdout))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexAny(line, " \t")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(line[:idx]))
+		val := strings.TrimSpace(line[idx+1:])
+		if key != "" {
+			result[key] = val
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// parseSshdConfig is the fallback parser that reads only /etc/ssh/sshd_config
+// directly. It is used when `sshd -T` cannot be executed.
+//
+// It detects Include directives and Match blocks and records warnings in
+// "_include" and "_match" keys (used by the report renderer).
 func parseSshdConfig() map[string]string {
 	result := map[string]string{}
 
