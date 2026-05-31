@@ -95,19 +95,34 @@ func GetSSHDirectives() map[string]string {
 // getEffectiveSSHDirectivesViaSSHDMinusT attempts to run `sshd -T` (non-elevated,
 // then elevated) to obtain the true runtime configuration. Returns nil if it
 // cannot be obtained (caller should fall back).
+//
+// It tries common full paths because on many Linux distributions (especially
+// Ubuntu/Debian) `sshd` lives in /usr/sbin which is often not in a normal
+// user's PATH.
 func getEffectiveSSHDirectivesViaSSHDMinusT() map[string]string {
+	candidates := []string{"sshd", "/usr/sbin/sshd", "/usr/bin/sshd", "/sbin/sshd"}
+
+	for _, bin := range candidates {
+		// Try non-elevated first.
+		res := exec.Run(bin, "-T")
+		if res.Success() && strings.TrimSpace(res.Stdout) != "" {
+			return parseSSHDMinusTOutput(res.Stdout)
+		}
+
+		// Then try with sudo.
+		res = exec.RunElevated(bin, "-T")
+		if res.Success() && strings.TrimSpace(res.Stdout) != "" {
+			return parseSSHDMinusTOutput(res.Stdout)
+		}
+	}
+
+	return nil
+}
+
+// parseSSHDMinusTOutput turns the stdout of `sshd -T` into a directive map.
+func parseSSHDMinusTOutput(output string) map[string]string {
 	result := map[string]string{}
-
-	// Try without sudo first (works on some systems or when already root).
-	res := exec.Run("sshd", "-T")
-	if !res.Success() || strings.TrimSpace(res.Stdout) == "" {
-		res = exec.RunElevated("sshd", "-T")
-	}
-	if !res.Success() || strings.TrimSpace(res.Stdout) == "" {
-		return nil
-	}
-
-	scanner := bufio.NewScanner(strings.NewReader(res.Stdout))
+	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
