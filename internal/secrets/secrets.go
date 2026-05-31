@@ -814,15 +814,33 @@ func isTerminal() bool {
 }
 
 // askBackendChoice displays a menu and returns the user's selection.
+// Probes the OS keyring up-front so the menu can flag it as unavailable
+// rather than letting the user pick it and fail on first use.
 func askBackendChoice() string {
+	keyringOK := hasKeyring()
+	keyringLine := "  [1] keyring    (OS keyring — recommended)"
+	defaultChoice := "1"
+	if !keyringOK {
+		keyringLine = "  [1] keyring    (OS keyring — NOT available on this system; see docs to install secret-tool / gnome-keyring)"
+		defaultChoice = "2"
+	}
+
 	fmt.Fprintln(os.Stderr, "Choose where to store the master key:")
-	fmt.Fprintln(os.Stderr, "  [1] keyring    (OS keyring — recommended)")
-	fmt.Fprintln(os.Stderr, "  [2] passphrase (scrypt-derived — good for servers)")
+	fmt.Fprintln(os.Stderr, keyringLine)
+	if keyringOK {
+		fmt.Fprintln(os.Stderr, "  [2] passphrase (scrypt-derived — good for servers)")
+	} else {
+		fmt.Fprintln(os.Stderr, "  [2] passphrase (scrypt-derived — recommended for this system)")
+	}
 	fmt.Fprintln(os.Stderr, "  [3] file       (key on disk — NOT recommended)")
-	fmt.Fprint(os.Stderr, "  Choice [1/2/3]: ")
+	fmt.Fprintf(os.Stderr, "  Choice [1/2/3, default %s]: ", defaultChoice)
 	var choice string
 	fmt.Fscanln(os.Stdin, &choice)
-	switch strings.TrimSpace(choice) {
+	c := strings.TrimSpace(choice)
+	if c == "" {
+		c = defaultChoice
+	}
+	switch c {
 	case "1":
 		return "keyring"
 	case "2":

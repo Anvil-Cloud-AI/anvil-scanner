@@ -32,6 +32,29 @@ const (
 
 var validKeyNameRE = regexp.MustCompile(`^[A-Z0-9_]+$`)
 
+// keyringErr builds an actionable error from a failed keyring subprocess.
+// It distinguishes "binary missing" (exit -1) from operational failure and
+// always includes whatever stderr the underlying tool produced so the user
+// has something concrete to act on — never "see system keyring logs".
+func keyringErr(op string, r iexec.Result) error {
+	if r.ExitCode == -1 {
+		switch runtime.GOOS {
+		case "darwin":
+			return fmt.Errorf("secrets: keyring %s: 'security' command not found (this is unusual on macOS)", op)
+		default: // linux
+			return fmt.Errorf("secrets: keyring %s: 'secret-tool' not found — install with: sudo apt install libsecret-tools (Debian/Ubuntu) or libsecret (Fedora/RHEL). On a headless server you may also need: sudo apt install gnome-keyring", op)
+		}
+	}
+	msg := strings.TrimSpace(r.Stderr)
+	if msg == "" {
+		msg = strings.TrimSpace(r.Stdout)
+	}
+	if msg == "" {
+		msg = fmt.Sprintf("exit %d", r.ExitCode)
+	}
+	return fmt.Errorf("secrets: keyring %s failed (exit %d): %s", op, r.ExitCode, msg)
+}
+
 // storeKeyringMasterKey stores a base64-encoded 32-byte AES master key in
 // the OS credential store.
 func storeKeyringMasterKey(key []byte) error {
@@ -52,7 +75,7 @@ func storeKeyringMasterKey(key []byte) error {
 			"-w", encoded,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: keyring store failed (exit %d): see system keyring logs", r.ExitCode)
+			return keyringErr("store master key", r)
 		}
 		return nil
 	default: // linux
@@ -66,7 +89,7 @@ func storeKeyringMasterKey(key []byte) error {
 			"username", keyringAccount,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: keyring store failed (exit %d): see system keyring logs", r.ExitCode)
+			return keyringErr("store master key", r)
 		}
 		return nil
 	}
@@ -84,7 +107,7 @@ func loadKeyringMasterKey() ([]byte, error) {
 			"-w",
 		)
 		if !r.Success() {
-			return nil, fmt.Errorf("secrets: keyring load failed (exit %d): see system keyring logs", r.ExitCode)
+			return nil, keyringErr("load master key", r)
 		}
 		raw = strings.TrimSpace(r.Stdout)
 	default: // linux
@@ -93,7 +116,7 @@ func loadKeyringMasterKey() ([]byte, error) {
 			"username", keyringAccount,
 		)
 		if !r.Success() {
-			return nil, fmt.Errorf("secrets: keyring load failed (exit %d): see system keyring logs", r.ExitCode)
+			return nil, keyringErr("load master key", r)
 		}
 		raw = strings.TrimSpace(r.Stdout)
 	}
@@ -118,7 +141,7 @@ func deleteKeyringMasterKey() error {
 		if r.ExitCode == 44 || r.Success() {
 			return nil
 		}
-		return fmt.Errorf("secrets: keyring delete failed (exit %d): see system keyring logs", r.ExitCode)
+		return keyringErr("delete master key", r)
 	default: // linux
 		r := iexec.Run("secret-tool", "clear",
 			"service", keyringService,
@@ -128,7 +151,7 @@ func deleteKeyringMasterKey() error {
 		if r.Success() {
 			return nil
 		}
-		return fmt.Errorf("secrets: keyring delete failed (exit %d): see system keyring logs", r.ExitCode)
+		return keyringErr("delete master key", r)
 	}
 }
 
@@ -146,7 +169,7 @@ func storeKeyringProbe() error {
 			"-w", keyringDummyKey,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: keyring probe store failed (exit %d): see system keyring logs", r.ExitCode)
+			return keyringErr("probe store", r)
 		}
 		return nil
 	default: // linux
@@ -159,7 +182,7 @@ func storeKeyringProbe() error {
 			"username", keyringProbeAccount,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: keyring probe store failed (exit %d): see system keyring logs", r.ExitCode)
+			return keyringErr("probe store", r)
 		}
 		return nil
 	}
@@ -177,7 +200,7 @@ func loadKeyringProbe() (string, error) {
 			"-w",
 		)
 		if !r.Success() {
-			return "", fmt.Errorf("secrets: keyring probe load failed (exit %d): see system keyring logs", r.ExitCode)
+			return "", keyringErr("probe load", r)
 		}
 		return strings.TrimSpace(r.Stdout), nil
 	default: // linux
@@ -188,7 +211,7 @@ func loadKeyringProbe() (string, error) {
 			"username", keyringProbeAccount,
 		)
 		if !r.Success() {
-			return "", fmt.Errorf("secrets: keyring probe load failed (exit %d): see system keyring logs", r.ExitCode)
+			return "", keyringErr("probe load", r)
 		}
 		return strings.TrimSpace(r.Stdout), nil
 	}
@@ -340,7 +363,7 @@ func storeKeyringSecret(name, value string) error {
 			"-w", value,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: store keyring secret %q (exit %d): see system keyring logs", name, r.ExitCode)
+			return keyringErr(fmt.Sprintf("store secret %q", name), r)
 		}
 		return nil
 	default: // linux
@@ -353,7 +376,7 @@ func storeKeyringSecret(name, value string) error {
 			"username", account,
 		)
 		if !r.Success() {
-			return fmt.Errorf("secrets: store keyring secret %q (exit %d): see system keyring logs", name, r.ExitCode)
+			return keyringErr(fmt.Sprintf("store secret %q", name), r)
 		}
 		return nil
 	}
@@ -406,7 +429,7 @@ func deleteKeyringSecret(name string) error {
 		if r.ExitCode == 44 || r.Success() {
 			return nil
 		}
-		return fmt.Errorf("secrets: delete keyring secret %q (exit %d): see system keyring logs", name, r.ExitCode)
+		return keyringErr(fmt.Sprintf("delete secret %q", name), r)
 	default: // linux
 		r := iexec.Run("secret-tool", "clear",
 			"service", keyringService,
@@ -415,7 +438,7 @@ func deleteKeyringSecret(name string) error {
 		if r.Success() {
 			return nil
 		}
-		return fmt.Errorf("secrets: delete keyring secret %q (exit %d): see system keyring logs", name, r.ExitCode)
+		return keyringErr(fmt.Sprintf("delete secret %q", name), r)
 	}
 }
 
