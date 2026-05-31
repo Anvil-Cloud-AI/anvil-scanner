@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/scan"
 )
@@ -198,5 +199,65 @@ func TestResult_Helpers(t *testing.T) {
 	}
 	if len(r.Failed) != 1 || r.Failed[0].Name != "KexAlgorithms" {
 		t.Errorf("failed: %+v", r.Failed)
+	}
+}
+
+// --- fail2ban restart verification retry (TDD for 1.3 reliability fix) ---
+
+func TestWaitForFail2banActive_RetriesOnTransientInactive(t *testing.T) {
+	originalCheck := fail2banActiveCheck
+	originalSleep := fail2banActiveCheckSleep
+	t.Cleanup(func() {
+		fail2banActiveCheck = originalCheck
+		fail2banActiveCheckSleep = originalSleep
+	})
+
+	calls := 0
+	fail2banActiveCheck = func() bool {
+		calls++
+		// First two checks report inactive (simulating slow post-restart activation), third succeeds.
+		return calls >= 3
+	}
+	sleepCalls := 0
+	fail2banActiveCheckSleep = func(d time.Duration) {
+		sleepCalls++
+		// No real sleep in test — we just count that it was asked to sleep between attempts.
+	}
+
+	got := waitForFail2banActive()
+
+	if !got {
+		t.Fatal("expected true after retries")
+	}
+	if calls != 3 {
+		t.Errorf("activeCheck called %d times, want 3 (initial + 2 retries)", calls)
+	}
+	if sleepCalls != 2 {
+		t.Errorf("sleep called %d times, want 2 (between the 3 attempts)", sleepCalls)
+	}
+}
+
+func TestWaitForFail2banActive_GivesUpAfterMaxAttempts(t *testing.T) {
+	originalCheck := fail2banActiveCheck
+	originalSleep := fail2banActiveCheckSleep
+	t.Cleanup(func() {
+		fail2banActiveCheck = originalCheck
+		fail2banActiveCheckSleep = originalSleep
+	})
+
+	calls := 0
+	fail2banActiveCheck = func() bool {
+		calls++
+		return false // always inactive
+	}
+	fail2banActiveCheckSleep = func(time.Duration) {}
+
+	got := waitForFail2banActive()
+
+	if got {
+		t.Fatal("expected false after exhausting attempts")
+	}
+	if calls != fail2banRestartVerifyAttempts {
+		t.Errorf("activeCheck called %d times, want exactly the max attempts (%d)", calls, fail2banRestartVerifyAttempts)
 	}
 }

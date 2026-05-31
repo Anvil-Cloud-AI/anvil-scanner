@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"os"
 	"time"
+
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/safehttp"
 )
 
 // abuseIPDBResponse is the outer JSON envelope from AbuseIPDB v2.
@@ -71,13 +73,8 @@ func CheckAbuseIPDB(ctx context.Context, publicIP string) AbuseIPDBResult {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "anvil-scanner/1.0")
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSHandshakeTimeout: 5 * time.Second,
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-		},
-	}
+	// SSRF-safe client (was previously unguarded).
+	client := safehttp.SafeClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return AbuseIPDBResult{Error: fmt.Sprintf("AbuseIPDB query failed: %v", err)}

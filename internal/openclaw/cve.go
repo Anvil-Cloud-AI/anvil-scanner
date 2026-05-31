@@ -3,16 +3,18 @@
 package openclaw
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/safehttp"
 )
 
 // cveFeedURL is the community-maintained OpenClaw advisory database by Jerry Gamblin
@@ -180,18 +182,17 @@ func cveCachePath() (string, error) {
 }
 
 // cveFetchClient is the HTTP client used to pull the live feed.
-var cveFetchClient = &http.Client{
-	Timeout: cveFetchTimeout,
-	Transport: &http.Transport{
-		TLSHandshakeTimeout: 5 * time.Second,
-		DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-	},
-}
+// Now uses the centralized SSRF-safe client.
+var cveFetchClient = safehttp.SafeClient(cveFetchTimeout)
 
 // fetchCVEFeed downloads ghsa-advisories.json, which is a flat JSON array,
 // and returns it wrapped in a feedCache envelope with a derived Updated date.
 func fetchCVEFeed() (*feedCache, error) {
-	req, err := http.NewRequest(http.MethodGet, cveFeedURL, nil)
+	// Use a context with timeout for the (now safe) request.
+	ctx, cancel := context.WithTimeout(context.Background(), cveFetchTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cveFeedURL, nil)
 	if err != nil {
 		return nil, err
 	}

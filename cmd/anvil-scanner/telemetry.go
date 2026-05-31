@@ -5,11 +5,9 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/report"
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/safehttp"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/scan"
 )
 
@@ -146,14 +145,8 @@ func submitTelemetry(rd report.Data) {
 		return
 	}
 
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-			TLSHandshakeTimeout: 5 * time.Second,
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-		},
-	}
+	// Use centralized safe client (adds SSRF protection that was previously missing).
+	client := safehttp.SafeClient(5 * time.Second)
 	req, err := http.NewRequestWithContext(context.Background(), "POST", telemetryEndpoint, bytes.NewReader(body))
 	if err != nil {
 		return

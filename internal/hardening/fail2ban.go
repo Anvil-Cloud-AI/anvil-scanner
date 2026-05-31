@@ -8,6 +8,7 @@ import (
 	osexec "os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	iexec "github.com/Anvil-Cloud-AI/anvil-scanner/internal/exec"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/scan"
@@ -42,6 +43,42 @@ backend  = systemd
 [sshd]
 enabled = true
 `
+
+// fail2ban restart verification tuning (used only when we just wrote jail.local).
+// We use a short bounded retry instead of fail2ban-client (which requires
+// privileges) so non-root --harden runs on Ubuntu VMs/containers do not
+// report spurious failures while the unit is still activating.
+const (
+	fail2banRestartVerifyAttempts = 3
+	fail2banRestartVerifySleep    = 800 * time.Millisecond
+)
+
+// fail2banActiveCheck and fail2banActiveCheckSleep are overridable for tests
+// (exact pattern used by backupRootFn / extraRestorePrefixesForTest in the
+// backup package). Production code must never assign to them.
+var (
+	fail2banActiveCheck      = func() bool {
+		res := iexec.Run("systemctl", "is-active", "fail2ban")
+		return strings.TrimSpace(res.Stdout) == "active"
+	}
+	fail2banActiveCheckSleep = time.Sleep
+)
+
+// waitForFail2banActive polls the (non-privileged) systemctl is-active check
+// a bounded number of times with short sleeps. Returns true as soon as the
+// unit reports active. Used after we restart fail2ban because we wrote a new
+// jail.local — the unit can take a moment to fully come up on slower systems.
+func waitForFail2banActive() bool {
+	for i := 0; i < fail2banRestartVerifyAttempts; i++ {
+		if i > 0 {
+			fail2banActiveCheckSleep(fail2banRestartVerifySleep)
+		}
+		if fail2banActiveCheck() {
+			return true
+		}
+	}
+	return false
+}
 
 // applyFail2ban ensures fail2ban is installed, the sshd jail is enabled,
 // and the service is running (F2B-001).
@@ -98,24 +135,34 @@ func applyFail2ban(idx map[string]scan.Status, r *Result) {
 					strings.TrimSpace(restartRes.Stderr+restartRes.Stdout)))
 			return
 		}
-	}
-
-	// Verify with systemctl is-active.  Earlier versions tried polling
-	// `fail2ban-client status` for a stricter "daemon is serving requests"
-	// signal, but that requires root/fail2ban-group access — for non-root
-	// hardening runs it failed every time and reported a spurious failure
-	// against a service that had actually come up fine.  systemctl tracks
-	// the same Type=forking unit state and works without elevation.
-	activeRes := iexec.Run("systemctl", "is-active", "fail2ban")
-	if strings.TrimSpace(activeRes.Stdout) != "active" {
-		jr := iexec.RunElevated("journalctl", "-u", "fail2ban", "-n", "20", "--no-pager")
-		journal := strings.TrimSpace(jr.Stdout)
-		if len(journal) > 400 {
-			journal = "..." + journal[len(journal)-400:]
+		// Bounded retry (3 attempts + short sleep by default) so we don't
+		// declare failure on slower Ubuntu VMs/containers while the unit
+		// is still activating. We deliberately stay with the non-privileged
+		// systemctl check (never fail2ban-client) to preserve the non-root
+		// hardening contract.
+		if !waitForFail2banActive() {
+			jr := iexec.RunElevated("journalctl", "-u", "fail2ban", "-n", "20", "--no-pager")
+			journal := strings.TrimSpace(jr.Stdout)
+			if len(journal) > 400 {
+				journal = "..." + journal[len(journal)-400:]
+			}
+			r.failed("F2B-001", "fail2ban service",
+				fmt.Sprintf("service did not reach active state after restart — check: sudo systemctl status fail2ban\n%s", journal))
+			return
 		}
-		r.failed("F2B-001", "fail2ban service",
-			fmt.Sprintf("service did not reach active state — check: sudo systemctl status fail2ban\n%s", journal))
-		return
+	} else {
+		// Not our restart — still do the single best-effort check (existing
+		// behaviour for the "service was already running" case).
+		if !fail2banActiveCheck() {
+			jr := iexec.RunElevated("journalctl", "-u", "fail2ban", "-n", "20", "--no-pager")
+			journal := strings.TrimSpace(jr.Stdout)
+			if len(journal) > 400 {
+				journal = "..." + journal[len(journal)-400:]
+			}
+			r.failed("F2B-001", "fail2ban service",
+				fmt.Sprintf("service did not reach active state — check: sudo systemctl status fail2ban\n%s", journal))
+			return
+		}
 	}
 
 	var details []string

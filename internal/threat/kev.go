@@ -7,11 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/safehttp"
 )
 
 const (
@@ -73,14 +74,8 @@ func fetchKEVFeed(ctx context.Context) (*kevFeed, float64, string) {
 		}
 	}
 
-	// Fetch from network.
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSHandshakeTimeout: 5 * time.Second,
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-		},
-	}
+	// Fetch from network. Use SSRF-safe client (was previously unguarded).
+	client := safehttp.SafeClient(30 * time.Second)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, kevFeedURL, nil)
 	if err != nil {
 		return nil, 0, fmt.Sprintf("KEV request build failed: %v", err)

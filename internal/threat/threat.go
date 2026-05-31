@@ -6,10 +6,11 @@ package threat
 import (
 	"context"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/safehttp"
 )
 
 // ShodanResult holds the Shodan InternetDB response for a public IP.
@@ -102,13 +103,8 @@ func getPublicIP(ctx context.Context) string {
 	}
 	req.Header.Set("User-Agent", "anvil-scanner/1.0")
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSHandshakeTimeout: 5 * time.Second,
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-		},
-	}
+	// Use the centralized SSRF-safe client (upgrades previous unguarded transport).
+	client := safehttp.SafeClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return ""

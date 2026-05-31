@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/safehttp"
 )
 
 // shodanResponse is the JSON shape returned by internetdb.shodan.io.
@@ -51,13 +53,8 @@ func CheckShodan(ctx context.Context, publicIP string) ShodanResult {
 	}
 	req.Header.Set("User-Agent", "anvil-scanner/1.0")
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSHandshakeTimeout: 5 * time.Second,
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-		},
-	}
+	// SSRF-safe client (was previously unguarded).
+	client := safehttp.SafeClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return ShodanResult{Error: fmt.Sprintf("Shodan query failed: %v", err)}
