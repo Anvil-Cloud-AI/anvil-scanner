@@ -42,8 +42,12 @@ func applyRPI006(idx map[string]scan.Status, bkup *backup.Manager, r *Result) {
 		if info.Mode().Perm()&0o002 == 0 {
 			continue
 		}
-		bkup.Backup(p, "RPi boot file before hardening")
-		if err := os.Chmod(p, 0o644); err != nil {
+		if content, readErr := iexec.ReadFileElevated(p); readErr == nil {
+			bkup.BackupContent(p, content, "RPi boot file before hardening")
+		} else {
+			bkup.Backup(p, "RPi boot file before hardening")
+		}
+		if err := iexec.ChmodElevated(p, "0644"); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
 		} else {
 			fixed = append(fixed, name)
@@ -68,7 +72,7 @@ func applyRPI007(idx map[string]scan.Status, r *Result) {
 		return
 	}
 
-	res := iexec.Run("raspi-config", "nonint", "do_boot_behaviour", "B1")
+	res := iexec.RunElevated("raspi-config", "nonint", "do_boot_behaviour", "B1")
 	if res.Success() {
 		r.applied("RPI-007", "Automatic console login disabled",
 			"raspi-config nonint do_boot_behaviour B1")
@@ -90,9 +94,14 @@ func applyRPI009(idx map[string]scan.Status, bkup *backup.Manager, r *Result) {
 		return
 	}
 
-	bkup.Backup(configPath, "RPi config.txt before GPU memory hardening")
+	raw, readErr := iexec.ReadFileElevated(configPath)
+	if readErr != nil {
+		r.failed("RPI-009", "GPU memory optimized for server", "read config.txt: "+readErr.Error())
+		return
+	}
+	bkup.BackupContent(configPath, raw, "RPi config.txt before GPU memory hardening")
 
-	res := iexec.Run("raspi-config", "nonint", "do_memory_split", "16")
+	res := iexec.RunElevated("raspi-config", "nonint", "do_memory_split", "16")
 	if res.Success() {
 		r.applied("RPI-009", "GPU memory optimized for server",
 			"raspi-config nonint do_memory_split 16")
@@ -100,12 +109,6 @@ func applyRPI009(idx map[string]scan.Status, bkup *backup.Manager, r *Result) {
 	}
 
 	// Fallback: edit config.txt directly.
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		r.failed("RPI-009", "GPU memory optimized for server", "read config.txt: "+err.Error())
-		return
-	}
-
 	lines := strings.Split(string(raw), "\n")
 	found := false
 	for i, line := range lines {
@@ -120,7 +123,7 @@ func applyRPI009(idx map[string]scan.Status, bkup *backup.Manager, r *Result) {
 		lines = append(lines, "gpu_mem=16")
 	}
 
-	if err := os.WriteFile(configPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+	if err := iexec.WriteFileElevated(configPath, []byte(strings.Join(lines, "\n")), "0644"); err != nil {
 		r.failed("RPI-009", "GPU memory optimized for server", "write config.txt: "+err.Error())
 		return
 	}

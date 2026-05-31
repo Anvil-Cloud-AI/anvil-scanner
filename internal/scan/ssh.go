@@ -86,20 +86,30 @@ func GetSSHDirectives() map[string]string { return parseSshdConfig() }
 // read, matching the Python reference behavior.
 func parseSshdConfig() map[string]string {
 	result := map[string]string{}
-	f, err := os.Open(sshdConfigPath)
+
+	data, err := os.ReadFile(sshdConfigPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			result["_error"] = "sshd_config not found"
-		} else {
-			result["_error"] = "Permission denied reading sshd_config (try sudo)"
+			return result
 		}
-		return result
+		if os.IsPermission(err) {
+			// Retry with sudo so non-root runs can still inspect the config.
+			elevated, elevErr := exec.ReadFileElevated(sshdConfigPath)
+			if elevErr != nil {
+				result["_error"] = "Permission denied reading sshd_config — re-run with sudo"
+				return result
+			}
+			data = elevated
+		} else {
+			result["_error"] = fmt.Sprintf("read error: %v", err)
+			return result
+		}
 	}
-	defer f.Close()
 
 	hasIncludes := false
 	inMatchBlock := false
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		raw := scanner.Text()
 		line := strings.TrimSpace(raw)

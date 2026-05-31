@@ -158,11 +158,12 @@ func writeTmpConfig(t *testing.T, content string) string {
 }
 
 func TestPatchSSHConfig_ReplacesExistingDirective(t *testing.T) {
-	p := writeTmpConfig(t, "MaxAuthTries 6\nPermitRootLogin no\n")
+	content := "MaxAuthTries 6\nPermitRootLogin no\n"
+	p := writeTmpConfig(t, content)
 	patches := map[string]struct{ canonical, value string }{
 		"maxauthtries": {"MaxAuthTries", "4"},
 	}
-	changed, applied, err := patchSSHConfig(p, patches)
+	changed, applied, err := patchSSHConfig(p, []byte(content), patches)
 	if err != nil {
 		t.Skipf("sshd -t not available: %v", err)
 	}

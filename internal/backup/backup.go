@@ -134,6 +134,49 @@ func (m *Manager) Backup(path, description string) bool {
 	return true
 }
 
+// BackupContent writes data (already-read bytes) into the session directory as
+// a backup of path.  Use this when the source file is root-owned and was
+// already read via exec.ReadFileElevated — avoids a second privileged read.
+func (m *Manager) BackupContent(path string, data []byte, description string) bool {
+	if err := os.MkdirAll(m.SessionDir, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: backup: cannot create session directory %s: %v\n", m.SessionDir, err)
+		return false
+	}
+
+	rel := path
+	if filepath.IsAbs(path) {
+		rel = strings.TrimPrefix(path, "/")
+	}
+	dest := filepath.Join(m.SessionDir, rel)
+
+	sessionPrefix := filepath.Clean(m.SessionDir) + string(filepath.Separator)
+	if !strings.HasPrefix(filepath.Clean(dest)+string(filepath.Separator), sessionPrefix) {
+		fmt.Fprintf(os.Stderr, "WARNING: backup: destination %q escapes session directory\n", dest)
+		return false
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: backup: cannot create destination directory %s: %v\n", filepath.Dir(dest), err)
+		return false
+	}
+
+	if err := os.WriteFile(dest, data, 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: backup: failed to write %s: %v\n", dest, err)
+		return false
+	}
+
+	m.entries = append(m.entries, manifestEntry{
+		Original:    path,
+		Backup:      dest,
+		Description: description,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	})
+	if err := m.saveManifest(); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: backup manifest not saved: %v\n", err)
+	}
+	return true
+}
+
 // HasBackups returns true if at least one file has been backed up this session.
 func (m *Manager) HasBackups() bool {
 	return len(m.entries) > 0

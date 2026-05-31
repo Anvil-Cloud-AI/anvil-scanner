@@ -120,17 +120,26 @@ func RunRPIChecks(b *CheckBuilder, info RPIInfo) {
 // default password "raspberry". Reads /etc/shadow — needs root.
 // On modern Pi OS the 'pi' user may not exist; that's a PASS.
 func rpi001DefaultPassword(b *CheckBuilder) {
-	f, err := os.Open("/etc/shadow")
+	data, err := os.ReadFile("/etc/shadow")
 	if err != nil {
-		b.Skip("RPI-001", "Default 'pi' user password",
-			"Cannot read /etc/shadow — run with sudo for this check", SeverityCritical)
-		return
+		if os.IsPermission(err) {
+			elevated, elevErr := exec.ReadFileElevated("/etc/shadow")
+			if elevErr != nil {
+				b.Skip("RPI-001", "Default 'pi' user password",
+					"Cannot read /etc/shadow — re-run with sudo for this check", SeverityCritical)
+				return
+			}
+			data = elevated
+		} else {
+			b.Skip("RPI-001", "Default 'pi' user password",
+				"Cannot read /etc/shadow — re-run with sudo for this check", SeverityCritical)
+			return
+		}
 	}
-	defer f.Close()
 
 	var piHash string
 	found := false
-	s := bufio.NewScanner(f)
+	s := bufio.NewScanner(strings.NewReader(string(data)))
 	for s.Scan() {
 		parts := strings.SplitN(s.Text(), ":", 3)
 		if len(parts) >= 2 && parts[0] == "pi" {
@@ -448,9 +457,19 @@ func rpi009GPUMemory(b *CheckBuilder) {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		b.Skip("RPI-009", "GPU memory optimized for server",
-			"Boot config not found — cannot check GPU memory split", SeverityLow)
-		return
+		if os.IsPermission(err) {
+			elevated, elevErr := exec.ReadFileElevated(configPath)
+			if elevErr != nil {
+				b.Skip("RPI-009", "GPU memory optimized for server",
+					"Cannot read boot config — re-run with sudo for this check", SeverityLow)
+				return
+			}
+			data = elevated
+		} else {
+			b.Skip("RPI-009", "GPU memory optimized for server",
+				"Boot config not found — cannot check GPU memory split", SeverityLow)
+			return
+		}
 	}
 
 	var gpuMem *int
