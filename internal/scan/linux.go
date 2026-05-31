@@ -4,6 +4,7 @@ package scan
 
 import (
 	"fmt"
+	osexec "os/exec"
 	"regexp"
 	"strings"
 
@@ -68,23 +69,51 @@ func f2b001Fail2ban(b *CheckBuilder) {
 // output. Returns (false, "") in all other cases — FW-002/003 are
 // dependent on ufw being active and are silently skipped otherwise,
 // matching the Python reference behavior.
+//
+// Install state and runtime state are checked separately so we can give an
+// accurate verdict even on non-root scans (where `ufw status` errors out
+// with "you need to be root").  Order:
+//
+//  1. binary on PATH? if no → fall through to iptables
+//  2. `ufw status verbose` works? prefer this — it gives us the default
+//     policy line FW-002 needs
+//  3. `systemctl is-active ufw` (no root required) → still a definitive
+//     answer for FW-001, but we lose the verbose output so FW-002/003 skip
 func fw001Firewall(b *CheckBuilder) (ufwActive bool, ufwOut string) {
-	// `ufw status verbose` is required to see the default policy line
-	// ("Default: deny (incoming), allow (outgoing), ...").  Plain `ufw status`
-	// only shows active/inactive and rules — FW-002 has no chance of passing
-	// without the verbose output.
-	ufwRes := exec.Run("ufw", "status", "verbose")
-
-	if ufwRes.Success() {
-		if strings.Contains(ufwRes.Stdout, "Status: active") {
-			b.Pass("FW-001", "Firewall (ufw) enabled",
-				"ufw is active", SeverityCritical)
-			return true, ufwRes.Stdout
+	if _, err := osexec.LookPath("ufw"); err == nil {
+		// `ufw status verbose` is required to see the default policy line
+		// ("Default: deny (incoming), allow (outgoing), ...").  Plain
+		// `ufw status` only shows active/inactive and rules — FW-002 has
+		// no chance of passing without the verbose output.
+		ufwRes := exec.Run("ufw", "status", "verbose")
+		if ufwRes.Success() {
+			if strings.Contains(ufwRes.Stdout, "Status: active") {
+				b.Pass("FW-001", "Firewall (ufw) enabled",
+					"ufw is active", SeverityCritical)
+				return true, ufwRes.Stdout
+			}
+			b.Fail("FW-001", "Firewall (ufw) enabled",
+				"ufw is installed but not active. Run: sudo ufw enable",
+				SeverityCritical)
+			return false, ""
 		}
-		b.Fail("FW-001", "Firewall (ufw) enabled",
-			"ufw is installed but not active. Run: sudo ufw enable",
-			SeverityCritical)
-		return false, ""
+
+		// ufw is installed but we couldn't read its status (typically
+		// "you need to be root").  systemctl is-active works without root.
+		sysRes := exec.Run("systemctl", "is-active", "ufw")
+		switch strings.TrimSpace(sysRes.Stdout) {
+		case "active":
+			b.Pass("FW-001", "Firewall (ufw) enabled",
+				"ufw service is active (re-run scan with sudo to also check FW-002 default policy and FW-003 port rules)",
+				SeverityCritical)
+			return false, "" // no verbose output → FW-002/003 are skipped
+		case "inactive", "failed":
+			b.Fail("FW-001", "Firewall (ufw) enabled",
+				"ufw is installed but the service is not active. Run: sudo ufw enable",
+				SeverityCritical)
+			return false, ""
+		}
+		// systemctl had no idea either — fall through to iptables / final FAIL.
 	}
 
 	// ufw unavailable — try iptables fallback
