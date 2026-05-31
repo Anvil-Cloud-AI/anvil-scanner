@@ -34,32 +34,55 @@ func RunLinuxChecks(b *CheckBuilder, platform string) {
 }
 
 // f2b001Fail2ban checks whether fail2ban is installed and the sshd jail is
-// active.  Mirrors the FW-001 shape: FAIL if not installed, FAIL if installed
-// but not running, PASS otherwise.
+// active.
+//
+// Install state and run state are checked separately so non-root scans
+// produce accurate results:
+//
+//   - Installed via LookPath (definitive, no permissions needed)
+//   - Running via `systemctl is-active fail2ban` (no root needed)
+//   - sshd jail via `fail2ban-client status` (requires root — best-effort
+//     introspection; absence is reported as a soft note, not a fail)
+//
+// Prior versions used `fail2ban-client status` as the running check, which
+// returned non-zero on permission denied for non-root users — so the scan
+// reported "service not running" for a service that was actually fine.
 func f2b001Fail2ban(b *CheckBuilder) {
-	res := exec.Run("fail2ban-client", "status")
-	if res.ExitCode == -1 {
+	if _, err := osexec.LookPath("fail2ban-client"); err != nil {
 		b.Fail("F2B-001", "fail2ban service",
 			"fail2ban not installed — SSH brute-force protection unavailable. "+
 				"Install and enable: sudo apt install fail2ban && sudo systemctl enable --now fail2ban",
 			SeverityHigh)
 		return
 	}
-	if !res.Success() {
+
+	activeRes := exec.Run("systemctl", "is-active", "fail2ban")
+	if strings.TrimSpace(activeRes.Stdout) != "active" {
 		b.Fail("F2B-001", "fail2ban service",
 			"fail2ban installed but the service is not running. "+
 				"Enable and start: sudo systemctl enable --now fail2ban",
 			SeverityHigh)
 		return
 	}
-	// status output contains "Jail list: ..." — sshd is the meaningful one.
-	if strings.Contains(res.Stdout, "sshd") {
+
+	// Service is up.  Try to introspect jails — requires fail2ban socket
+	// access (root or fail2ban group), so silently tolerate failure.
+	jailsRes := exec.Run("fail2ban-client", "status")
+	switch {
+	case jailsRes.Success() && strings.Contains(jailsRes.Stdout, "sshd"):
 		b.Pass("F2B-001", "fail2ban service",
 			"fail2ban running with sshd jail enabled", SeverityHigh)
-	} else {
+	case jailsRes.Success():
 		b.Warn("F2B-001", "fail2ban service",
 			"fail2ban is running but no sshd jail is active. "+
 				"Enable the sshd jail in /etc/fail2ban/jail.local",
+			SeverityHigh)
+	default:
+		// Couldn't introspect jails (typically permission denied).  Service
+		// is active per systemd, so this is a PASS — re-run under sudo if
+		// the user wants the jail breakdown.
+		b.Pass("F2B-001", "fail2ban service",
+			"fail2ban service is active (re-run with sudo to introspect jails)",
 			SeverityHigh)
 	}
 }
