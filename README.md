@@ -59,16 +59,6 @@ curl -L https://github.com/Anvil-Cloud-AI/anvil-scanner/releases/latest/download
 sudo mv anvil-scanner /usr/local/bin/
 ```
 
-### Build from source
-
-Requires Go 1.25+.
-
-```bash
-go install github.com/Anvil-Cloud-AI/anvil-scanner/cmd/anvil-scanner@latest
-```
-
----
-
 ## Configuration
 
 Set your AI provider key as an environment variable (pick one):
