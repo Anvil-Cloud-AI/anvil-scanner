@@ -14,6 +14,44 @@ Every entry records: date, scope, toolchain, findings by severity, and fix refer
 
 ---
 
+## 2026-06-04 — Pre-merge deep review: container scanning feature
+
+**Type:** Periodic
+
+**Date:** 2026-06-04
+
+**Scope:** Pre-merge security review of branch `feat/container-scanning` (PR #9), which adds the `internal/container` package (runtime hardening across docker/podman + image CVE scanning via grype/trivy + registry scanning via `--scan-image`), the report Containers section, and the OpenClaw structural-check refactor. Review covered the full branch diff vs `main` (~1,400 LOC): all new subprocess execution (`docker`/`podman` ps & inspect, `grype`/`trivy` invocation), untrusted-data parsing (scanner + inspect JSON), the new HTML/JSON report surfaces, the `--scan-image` user-input boundary, and resource/cancellation handling. Triggered by explicit pre-merge request.
+
+**Toolchain:**
+- `go test -race ./...` — full suite, clean
+- `go vet ./...` — clean
+- `staticcheck ./internal/container/... ./internal/report/... ./cmd/...` — 0 findings
+- `gosec` (v2, on changed packages) — 4 findings, **all pre-existing** (report write-path `G304` in `report.go` WriteHTML/WriteJSON to a user-specified output path; telemetry `os.ReadFile`/`resp.Body.Close` in `telemetry.go`); **0 in the new `internal/container` code**
+- `govulncheck ./...` — 4 Go **standard-library** advisories (GO-2026-5039 net/textproto, GO-2026-5037 crypto/x509, GO-2026-4971 net, GO-2026-4918 net/http), all repo-wide and fixed in go1.26.3/1.26.4 (local toolchain is go1.26.2); none introduced by this branch and none reached from `internal/container`
+- Two independent manual adversarial reviews (`security-reviewer` agent), pre- and post-fix, with data-flow tracing for argument injection, XSS, untrusted-JSON handling, SSRF, and context cancellation
+
+**Results:**
+- **No CRITICAL findings.** No HIGH findings remaining after remediation.
+- First adversarial pass (during development) flagged 2 HIGH issues — both fixed and re-verified:
+  - **High:** Argument injection — a `--scan-image` ref (or container ID from `ps`) beginning with `-` could be reinterpreted as a grype/trivy/`inspect` flag (e.g. trivy `--output`/`--username`). Closed by `ValidateImageRef` (anchored allowlist `^[A-Za-z0-9][A-Za-z0-9_.\-/:@]*$` + leading-dash guard + 512-char cap) **and** passing every external ref/ID after a `--` argv separator.
+  - **High:** Scanner subprocess ignored the parent (signal) context — Ctrl-C wouldn't cancel an in-flight image pull. Fixed by threading `ctx` through `ScanImages`→`scanOne`.
+- Second (independent, post-fix) pass confirmed all prior fixes hold (separators, regexp anchoring, HTML escaping of every report field, 1 MiB exec output cap, safe JSON decoding, timeout/cancel behavior) and found 1 MEDIUM + minor items, now addressed.
+- gosec/staticcheck/govulncheck surfaced nothing new in the feature code.
+
+**Remediation summary:**
+- **MEDIUM** — image refs discovered from `docker/podman ps` previously bypassed `ValidateImageRef` (only `--scan-image` refs were validated). Now every ref is validated in `ScanImages` before reaching the scanner; an invalid runtime-derived ref is recorded as a skipped `ImageScan.Error` rather than executed.
+- **LOW** — `CONTAINER-003` (root-user check) missed `root:group` / `root:0` forms; now splits on `:` and inspects the user half, so root expressed with a group is still flagged. Tests added.
+- **LOW** — added a `ctx.Err()` guard between sequential image scans so a cancelled run stops promptly instead of launching another subprocess.
+- **INFO/accepted** — grype/trivy perform their own registry network I/O outside the `internal/safehttp` SSRF guard; this is inherent to delegating to an external scanner and is mitigated by ref validation + documented on the `--scan-image` flag and in the README ("only pass trusted references"). No code change.
+- **Deferred (not this branch):** `internal/exec` sets `TimedOut` only on `DeadlineExceeded`, so parent-context cancellation is reported as a generic failure rather than a timeout — diagnostic-only, shared code, tracked separately. Go toolchain bump to ≥1.26.4 to clear the stdlib govulncheck advisories — repo-wide, handled outside this PR.
+- All new external data in the report passes through `html.EscapeString`; per-image CVE rows capped (200) to bound report size; all subprocess calls use explicit argument lists (no shell).
+
+**Fix commits:** Branch `feat/container-scanning` (PR #9) — feature + in-development HIGH fixes in `fe455e7`; post-review MEDIUM/LOW remediations in the follow-up commit on the same branch.
+
+**Notes:** SAST tools (gosec, govulncheck, staticcheck) were installed locally for this pass since CI normally provides them; semgrep was not run locally (CI `p/golang` + `p/owasp-top-ten` + `p/secrets` gates still apply on the PR). Re-confirm CI is green before merge.
+
+---
+
 ## 2026-05-31 — Periodic deep security review & hardening pass (post-v1.0.0)
 
 **Type:** Periodic

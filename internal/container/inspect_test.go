@@ -85,9 +85,13 @@ func TestUserFinding(t *testing.T) {
 		{"0", scan.StatusWarn},
 		{"root", scan.StatusWarn},
 		{"0:0", scan.StatusWarn},
+		{"root:root", scan.StatusWarn},
+		{"root:0", scan.StatusWarn},
+		{"root:appgroup", scan.StatusWarn},
 		{"1000", scan.StatusPass},
 		{"1000:1000", scan.StatusPass},
 		{"appuser", scan.StatusPass},
+		{"appuser:root", scan.StatusPass},
 	}
 	for _, tc := range tests {
 		t.Run(tc.user, func(t *testing.T) {

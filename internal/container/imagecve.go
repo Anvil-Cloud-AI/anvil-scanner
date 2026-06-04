@@ -81,6 +81,18 @@ func ScanImages(ctx context.Context, extraRefs []string) *ImageCVEResult {
 
 	res := &ImageCVEResult{Scanner: scanner}
 	for _, ref := range refs {
+		// Stop promptly if the run was cancelled (e.g. SIGINT) rather than
+		// kicking off another scanner subprocess.
+		if ctx.Err() != nil {
+			break
+		}
+		// Refs discovered from the runtime are external data too — validate
+		// every ref (not just --scan-image ones) before it reaches the
+		// scanner, so a hostile image name can't smuggle in scanner flags.
+		if err := ValidateImageRef(ref); err != nil {
+			res.Scans = append(res.Scans, ImageScan{Ref: ref, Error: "skipped: " + err.Error()})
+			continue
+		}
 		res.Scans = append(res.Scans, scanOne(ctx, scanner, ref))
 	}
 	return res

@@ -109,7 +109,10 @@ func userFinding(ci containerInspect, short string) finding {
 	const sev = scan.SeverityHigh
 	name := fmt.Sprintf("Container not running as root [%s]", short)
 	user := strings.TrimSpace(ci.Config.User)
-	isRoot := user == "" || user == "0" || user == "root" || strings.HasPrefix(user, "0:")
+	// User may be "uid", "uid:gid", "name", or "name:group". Inspect only the
+	// user half so root expressed as "root:appgroup" or "0:0" is still caught.
+	userPart := strings.SplitN(user, ":", 2)[0]
+	isRoot := userPart == "" || userPart == "0" || userPart == "root"
 	if isRoot {
 		return finding{"CONTAINER-003", name, scan.StatusWarn,
 			"Container process runs as root (no USER directive or USER 0). " +
