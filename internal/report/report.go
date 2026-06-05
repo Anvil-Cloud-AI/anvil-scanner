@@ -15,6 +15,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/container"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/openclaw"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/scan"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/threat"
@@ -51,6 +52,10 @@ type Data struct {
 	OCVulnResult *openclaw.OCVulnResult
 	// ThreatResult is the optional threat intelligence scan output.
 	ThreatResult *threat.Result
+	// ContainerCVEs is the optional container image CVE scan output (grype/trivy).
+	// The CONTAINER-* runtime-hardening findings live in Checks; this carries the
+	// detailed per-image vulnerability tables for the Containers section.
+	ContainerCVEs *container.ImageCVEResult
 }
 
 // AIAnalysis holds the result from an AI risk analysis pass.
@@ -110,14 +115,31 @@ func MarshalJSON(d Data) ([]byte, error) {
 }
 
 type jsonReport struct {
-	Platform         string       `json:"platform"`
-	Timestamp        string       `json:"timestamp"`
-	Checks           []scan.Check `json:"checks"`
-	Summary          jsonSummary  `json:"summary"`
-	PriorityFindings []scan.Check `json:"priority_findings"`
-	OpenPorts        []string     `json:"open_ports"`
-	PendingUpdates   int          `json:"pending_updates"`
-	AI               *jsonAI      `json:"ai_analysis,omitempty"`
+	Platform         string          `json:"platform"`
+	Timestamp        string          `json:"timestamp"`
+	Checks           []scan.Check    `json:"checks"`
+	Summary          jsonSummary     `json:"summary"`
+	PriorityFindings []scan.Check    `json:"priority_findings"`
+	OpenPorts        []string        `json:"open_ports"`
+	PendingUpdates   int             `json:"pending_updates"`
+	AI               *jsonAI         `json:"ai_analysis,omitempty"`
+	Containers       *jsonContainers `json:"containers,omitempty"`
+}
+
+type jsonContainers struct {
+	Scanner string               `json:"scanner,omitempty"`
+	Skipped bool                 `json:"skipped,omitempty"`
+	Images  []jsonContainerImage `json:"images,omitempty"`
+}
+
+type jsonContainerImage struct {
+	Ref      string `json:"ref"`
+	Critical int    `json:"critical"`
+	High     int    `json:"high"`
+	Medium   int    `json:"medium"`
+	Low      int    `json:"low"`
+	Unknown  int    `json:"unknown,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 type jsonSummary struct {
@@ -192,7 +214,33 @@ func buildJSONPayload(d Data) jsonReport {
 			Skipped:         d.Analysis.Skipped,
 		}
 	}
+	if d.ContainerCVEs != nil {
+		r.Containers = buildJSONContainers(d.ContainerCVEs)
+	}
 	return r
+}
+
+func buildJSONContainers(c *container.ImageCVEResult) *jsonContainers {
+	jc := &jsonContainers{Scanner: c.Scanner, Skipped: c.Skipped}
+	for _, s := range c.Scans {
+		img := jsonContainerImage{Ref: s.Ref, Error: s.Error}
+		for _, f := range s.Findings {
+			switch f.Severity {
+			case "CRITICAL":
+				img.Critical++
+			case "HIGH":
+				img.High++
+			case "MEDIUM":
+				img.Medium++
+			case "LOW":
+				img.Low++
+			default:
+				img.Unknown++
+			}
+		}
+		jc.Images = append(jc.Images, img)
+	}
+	return jc
 }
 
 // PriorityFindings returns the subset of checks that have an actionable

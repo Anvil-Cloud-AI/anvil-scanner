@@ -32,21 +32,21 @@ import (
 type Provider string
 
 const (
-	ProviderOllama  Provider = "ollama"
-	ProviderClaude  Provider = "claude"
-	ProviderOpenAI  Provider = "openai"
-	ProviderGrok    Provider = "grok"
-	ProviderNone    Provider = "none"
+	ProviderOllama Provider = "ollama"
+	ProviderClaude Provider = "claude"
+	ProviderOpenAI Provider = "openai"
+	ProviderGrok   Provider = "grok"
+	ProviderNone   Provider = "none"
 )
 
 const (
-	defaultOllamaURL   = "http://localhost:11434"
-	defaultOllamaModel = "llama3"
-	defaultClaudeModel = "claude-sonnet-4-6"
-	defaultOpenAIModel = "gpt-4o-mini"
-	defaultGrokModel   = "grok-3-mini"
-	defaultXAIURL      = "https://api.x.ai/v1"
-	ollamaProbeTimeout = 500 * time.Millisecond
+	defaultOllamaURL    = "http://localhost:11434"
+	defaultOllamaModel  = "llama3"
+	defaultClaudeModel  = "claude-sonnet-4-6"
+	defaultOpenAIModel  = "gpt-4o-mini"
+	defaultGrokModel    = "grok-3-mini"
+	defaultXAIURL       = "https://api.x.ai/v1"
+	ollamaProbeTimeout  = 500 * time.Millisecond
 	providerCallTimeout = 120 * time.Second
 	maxResponseBody     = 1 << 20 // 1 MiB
 	maxErrorSnippet     = 200
@@ -54,13 +54,6 @@ const (
 
 // privateCIDRs is initialised once and reused by validateExternalAPIURL.
 var privateCIDRs []*net.IPNet
-
-// ssrfSafeTransport closes the DNS-rebinding TOCTOU window by re-validating
-// the resolved IP at DialContext time rather than only at validation time.
-// Used by callOpenAI so a user-supplied XAI_API_URL cannot be redirected to
-// a private address between the pre-flight validateExternalAPIURL check and
-// the actual HTTP connection.
-var ssrfSafeTransport *http.Transport
 
 func init() {
 	for _, cidr := range []string{
@@ -72,35 +65,6 @@ func init() {
 		if err == nil {
 			privateCIDRs = append(privateCIDRs, n)
 		}
-	}
-
-	baseDialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-	ssrfSafeTransport = &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, fmt.Errorf("parse dial addr: %w", err)
-			}
-			ips, err := net.DefaultResolver.LookupHost(ctx, host)
-			if err != nil {
-				return nil, fmt.Errorf("resolve %s: %w", host, err)
-			}
-			for _, ipStr := range ips {
-				ip := net.ParseIP(ipStr)
-				if ip == nil {
-					continue
-				}
-				for _, n := range privateCIDRs {
-					if n.Contains(ip) {
-						return nil, fmt.Errorf("SSRF guard: %s resolves to private address %s", host, ipStr)
-					}
-				}
-			}
-			if len(ips) == 0 {
-				return nil, fmt.Errorf("no addresses resolved for %s", host)
-			}
-			return baseDialer.DialContext(ctx, network, net.JoinHostPort(ips[0], port))
-		},
 	}
 }
 
@@ -468,7 +432,7 @@ func callOllama(ctx context.Context, prompt string) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// Use a plain transport: validateOllamaURL already enforces localhost-only,
-	// so ssrfSafeTransport's private-IP guard is not needed (and would block loopback).
+	// so the SSRF private-IP guard is not needed here (and would block loopback).
 	ollamaClient := &http.Client{
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,

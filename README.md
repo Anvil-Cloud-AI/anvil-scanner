@@ -131,6 +131,12 @@ sudo anvil-scanner --no-ai
 # Skip OpenClaw audit
 sudo anvil-scanner --no-openclaw
 
+# Skip container runtime hardening + image CVE scanning
+sudo anvil-scanner --no-container-scan
+
+# Scan an extra image (registry ref) for CVEs — repeatable
+sudo anvil-scanner --scan-image nginx:1.21 --scan-image alpine:3.19
+
 # Write HTML report to a specific path
 sudo anvil-scanner --html /tmp/report.html
 
@@ -184,6 +190,28 @@ Runs by default. Disable with `--no-threat-intel`. Results appear in the HTML re
 | Local IoC scan | Suspicious cron jobs, crypto miners, C2 tools, SSH persistence, auth log anomalies | No |
 | CVE exposure | Installed packages cross-referenced against known CVEs | No |
 | CISA KEV | Installed packages cross-referenced against CISA's Known Exploited Vulnerabilities catalog | No |
+
+---
+
+## Container Scanning
+
+Runs by default when a container runtime is present. Disable with `--no-container-scan`.
+
+**Runtime hardening** inspects every running container (docker, then podman) and emits `CONTAINER-*` checks — surfaced under the report's **System** section and, when actionable, in Priority Findings:
+
+| Check | Flags |
+|-------|-------|
+| `CONTAINER-001` | Ports published to all interfaces (`0.0.0.0`/`::`) |
+| `CONTAINER-002` | Container running `--privileged` |
+| `CONTAINER-003` | Container running as root |
+| `CONTAINER-004` | Container runtime socket bind-mounted into the container |
+
+**Image CVE scanning** shells out to [`grype`](https://github.com/anchore/grype) (preferred) or [`trivy`](https://github.com/aquasecurity/trivy) if either is on `PATH`, scanning the images behind running containers plus any `--scan-image <ref>` references (registry images are pulled by the scanner). Results appear in the HTML report's **Containers** section and the JSON `containers` block, with a `CONTAINER-CVE` rollup feeding the risk summary. If neither scanner is installed, image scanning is skipped with an install hint — runtime hardening still runs.
+
+```bash
+# Optional: install a scanner to enable image CVE scanning
+brew install grype     # or: brew install trivy
+```
 
 ---
 
