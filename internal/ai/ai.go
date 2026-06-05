@@ -418,8 +418,6 @@ func callOllama(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("create ollama request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// Use a plain transport: validateOllamaURL already enforces localhost-only,
-	// so ssrfSafeTransport's private-IP guard is not needed (and would block loopback).
 	ollamaClient := &http.Client{
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
