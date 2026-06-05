@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build darwin || linux || windows
 
 package openclaw
 
@@ -52,9 +52,9 @@ var brewPathMarkers = []string{
 // Channel-specific upgrade commands that replace OpenClaw's generic
 // "update openclaw" remediation text.
 var upgradeCommands = map[string]string{
-	"npm":    "npm update -g openclaw",
-	"brew":   "brew upgrade openclaw",
-	"source": "cd $OPENCLAW_SRC && git pull && make install",
+	"npm":     "npm update -g openclaw",
+	"brew":    "brew upgrade openclaw",
+	"source":  "cd $OPENCLAW_SRC && git pull && make install",
 	"unknown": "see https://openclaw.io/install for upgrade instructions",
 }
 

@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build darwin || linux || windows
 
 package threat
 
@@ -14,10 +14,10 @@ import (
 
 // cveEntry describes one CVE record in the bundled database.
 type cveEntry struct {
-	CVE          string
+	CVE           string
 	AffectedBelow string
-	Severity     string
-	Desc         string
+	Severity      string
+	Desc          string
 }
 
 // knownCVEs is the curated vulnerability database, ported from the Python reference.
