@@ -33,13 +33,14 @@ var severityColors = map[scan.Severity]string{
 	scan.SeverityLow:      "#6b7280",
 }
 
-var catOrder = []string{"SSH", "FW", "MACOS", "RPI"}
+var catOrder = []string{"SSH", "FW", "MACOS", "RPI", "CONTAINER"}
 
 var catLabels = map[string]string{
-	"SSH":   "🔑 SSH Hardening",
-	"FW":    "🛡️ Firewall",
-	"MACOS": "🍎 macOS Security",
-	"RPI":   "🍓 Raspberry Pi Security",
+	"SSH":       "🔑 SSH Hardening",
+	"FW":        "🛡️ Firewall",
+	"MACOS":     "🍎 macOS Security",
+	"RPI":       "🍓 Raspberry Pi Security",
+	"CONTAINER": "🐳 Container Hardening",
 }
 
 var findingDocs = map[string]string{
@@ -85,6 +86,7 @@ func renderHTML(d Data) string {
 	hasOCVulns := d.OCVulnResult != nil
 	showOCSection := hasOCChecks || hasOCVulns
 	hasThreat := d.ThreatResult != nil
+	hasContainers := d.ContainerCVEs != nil && !d.ContainerCVEs.Skipped && len(d.ContainerCVEs.Scans) > 0
 
 	type tab struct{ id, label string }
 	tabs := []tab{{"summary", "Summary"}}
@@ -92,6 +94,9 @@ func renderHTML(d Data) string {
 		tabs = append(tabs, tab{"priority", "Priority"})
 	}
 	tabs = append(tabs, tab{"system", "System"})
+	if hasContainers {
+		tabs = append(tabs, tab{"containers", "Containers"})
+	}
 	if showOCSection {
 		tabs = append(tabs, tab{"openclaw", "OpenClaw"})
 	}
@@ -411,6 +416,12 @@ footer{text-align:center;color:var(--text-mut);font-size:.78rem;padding:28px 24p
 		fail2banHTML,
 		extHTML))
 
+	// Containers section
+	if hasContainers {
+		b.WriteString(fmt.Sprintf("  <div id=\"containers\" data-nav-section>\n%s\n  </div>\n",
+			renderContainerCVEs(d.ContainerCVEs)))
+	}
+
 	// OpenClaw section
 	if showOCSection {
 		ocContent := ""
@@ -508,4 +519,3 @@ func renderPriorityCard(critCount, highCount int) string {
 		strings.Join(rows, "<br>"),
 	)
 }
-

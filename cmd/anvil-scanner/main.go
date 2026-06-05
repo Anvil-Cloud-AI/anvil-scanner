@@ -22,6 +22,7 @@ import (
 
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/ai"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/backup"
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/container"
 	iexec "github.com/Anvil-Cloud-AI/anvil-scanner/internal/exec"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/hardening"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/openclaw"
@@ -34,6 +35,20 @@ import (
 
 // Version is set at build time by goreleaser via -ldflags.
 var Version = "0.0.0-dev"
+
+// stringSliceFlag is a flag.Value that accumulates repeated occurrences of a
+// string flag (e.g. --scan-image a --scan-image b).
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string { return strings.Join(*s, ",") }
+
+func (s *stringSliceFlag) Set(v string) error {
+	if err := container.ValidateImageRef(v); err != nil {
+		return fmt.Errorf("--scan-image: %w", err)
+	}
+	*s = append(*s, v)
+	return nil
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -49,28 +64,31 @@ func run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("anvil-scanner", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
-	showVersion   := fs.Bool("version", false, "Print version and exit")
+	showVersion := fs.Bool("version", false, "Print version and exit")
 	fs.BoolVar(showVersion, "v", false, "Short alias for --version")
-	noAI          := fs.Bool("no-ai", false, "Skip AI risk analysis")
+	noAI := fs.Bool("no-ai", false, "Skip AI risk analysis")
 	noThreatIntel := fs.Bool("no-threat-intel", false, "Skip threat intelligence checks (Shodan, AbuseIPDB, CVE, CISA KEV, local IoC)")
-	noOpenClaw    := fs.Bool("no-openclaw", false, "Skip OpenClaw security audit")
-	jsonOut       := fs.Bool("json", false, "Print JSON report to stdout (HTML report also written unless suppressed by --html)")
-	htmlPath      := fs.String("html", "", "Write HTML report to this path (default: ~/anvil-scanner-reports/)")
-	jsonPath      := fs.String("json-output", "", "Write JSON report to this path (HTML report also written unless suppressed by --html)")
-	doTelemetry   := fs.Bool("telemetry", false, "Send anonymized scan summary to Anvil telemetry (opt-in; also enabled by ANVIL_TELEMETRY=1)")
-	doSchedule    := fs.Bool("schedule", false, "Install hourly scheduled scan (launchd on macOS, crontab on Linux)")
-	doUnschedule  := fs.Bool("unschedule", false, "Remove the scheduled scan job")
-	scheduleDry   := fs.Bool("schedule-dry-run", false, "Show what --schedule would install without making changes (implies --schedule)")
-	doRevert       := fs.Bool("revert", false, "Interactively restore files from a backup session")
-	doUninstall    := fs.Bool("uninstall", false, "Restore all backup sessions and remove all anvil-scanner changes")
+	noOpenClaw := fs.Bool("no-openclaw", false, "Skip OpenClaw security audit")
+	noContainerScan := fs.Bool("no-container-scan", false, "Skip container runtime hardening and image CVE scanning")
+	var scanImageRefs stringSliceFlag
+	fs.Var(&scanImageRefs, "scan-image", "Scan an additional image reference for CVEs (repeatable; e.g. --scan-image alpine:3.19). The scanner pulls registry refs directly — only pass trusted references.")
+	jsonOut := fs.Bool("json", false, "Print JSON report to stdout (HTML report also written unless suppressed by --html)")
+	htmlPath := fs.String("html", "", "Write HTML report to this path (default: ~/anvil-scanner-reports/)")
+	jsonPath := fs.String("json-output", "", "Write JSON report to this path (HTML report also written unless suppressed by --html)")
+	doTelemetry := fs.Bool("telemetry", false, "Send anonymized scan summary to Anvil telemetry (opt-in; also enabled by ANVIL_TELEMETRY=1)")
+	doSchedule := fs.Bool("schedule", false, "Install hourly scheduled scan (launchd on macOS, crontab on Linux)")
+	doUnschedule := fs.Bool("unschedule", false, "Remove the scheduled scan job")
+	scheduleDry := fs.Bool("schedule-dry-run", false, "Show what --schedule would install without making changes (implies --schedule)")
+	doRevert := fs.Bool("revert", false, "Interactively restore files from a backup session")
+	doUninstall := fs.Bool("uninstall", false, "Restore all backup sessions and remove all anvil-scanner changes")
 	forceUninstall := fs.Bool("force", false, "With --uninstall: proceed even when no backups are found")
-	doInitSecrets  := fs.Bool("init-secrets", false, "Encrypt API keys into the secrets container (interactive wizard)")
-	encryptSrc     := fs.String("encrypt", "", "Encrypt a .env file into the secrets container")
-	decryptDest    := fs.String("decrypt", "", "Decrypt the secrets container to a .env file")
-	rotateBackend  := fs.String("rotate-key-backend", "", "Re-encrypt the secrets container under a new backend (keyring|passphrase|file)")
+	doInitSecrets := fs.Bool("init-secrets", false, "Encrypt API keys into the secrets container (interactive wizard)")
+	encryptSrc := fs.String("encrypt", "", "Encrypt a .env file into the secrets container")
+	decryptDest := fs.String("decrypt", "", "Decrypt the secrets container to a .env file")
+	rotateBackend := fs.String("rotate-key-backend", "", "Re-encrypt the secrets container under a new backend (keyring|passphrase|file)")
 	secretsBackend := fs.String("backend", "", "Key backend for --init-secrets / --encrypt (keyring|passphrase|file)")
 	doStoreKeyring := fs.Bool("store-keyring", false, "Copy secrets from the container into individual OS keyring entries")
-	doHarden       := fs.Bool("harden", false, "Apply auto-fixable hardening remediation for failing checks (prompts for sudo when needed)")
+	doHarden := fs.Bool("harden", false, "Apply auto-fixable hardening remediation for failing checks (prompts for sudo when needed)")
 
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -233,6 +251,21 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 
+	// Container scanning (on by default unless --no-container-scan). Runs after
+	// the harden block so the CONTAINER-* checks survive the post-harden
+	// re-scan that rebuilds `result`.
+	var containerCVEs *container.ImageCVEResult
+	if !*noContainerScan {
+		fmt.Fprint(progress, "\nScanning containers...")
+		cb := scan.NewBuilder(scan.WithClock(func() time.Time { return time.Now().UTC() }))
+		container.RunRuntimeChecks(cb)
+		containerCVEs = container.ScanImages(ctx, scanImageRefs)
+		container.RunImageCVECheck(cb, containerCVEs)
+		containerChecks := cb.Build().Checks
+		result.Checks = append(result.Checks, containerChecks...)
+		printContainerSummaryTo(progress, containerCVEs, containerChecks)
+	}
+
 	// OpenClaw audit (always on unless --no-openclaw)
 	var ocChecks []scan.Check
 	var ocVulnResult *openclaw.OCVulnResult
@@ -299,7 +332,7 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 
-	rd := buildReportData(result, ocChecks, ocVulnResult, threatResult, analysis, scan.Platform(), openPorts, pendingUpdates, isRPi, rpiModel)
+	rd := buildReportData(result, ocChecks, ocVulnResult, threatResult, containerCVEs, analysis, scan.Platform(), openPorts, pendingUpdates, isRPi, rpiModel)
 
 	if *jsonOut {
 		data, err := report.MarshalJSON(rd)
@@ -410,8 +443,35 @@ func printThreatSummaryTo(w io.Writer, r threat.Result) {
 	}
 }
 
+func printContainerSummaryTo(w io.Writer, r *container.ImageCVEResult, checks []scan.Check) {
+	switch {
+	case r == nil:
+		fmt.Fprintln(w, " skipped")
+	case r.Skipped:
+		fmt.Fprintf(w, " image CVE scan skipped (%s)\n", r.SkipReason)
+	case len(r.Scans) == 0:
+		fmt.Fprintln(w, " no images to scan")
+	default:
+		crit, high, total := r.SeverityCounts()
+		fmt.Fprintf(w, " %d image(s) scanned via %s — %d CVE(s) (%d critical, %d high)\n",
+			len(r.Scans), r.Scanner, total, crit, high)
+	}
 
-func buildReportData(result scan.Result, ocChecks []scan.Check, ocVulnResult *openclaw.OCVulnResult, threatResult *threat.Result, analysis ai.Analysis, platform string, openPorts []string, pendingUpdates int, isRPi bool, rpiModel string) report.Data {
+	// Surface any actionable container findings (runtime hardening + the CVE
+	// rollup) in the terminal — they are appended to result.Checks after the
+	// main summary already printed, so without this they'd be report-only.
+	priority := report.PriorityFindings(checks)
+	for _, c := range priority {
+		icon := "❌"
+		if c.Status == scan.StatusWarn {
+			icon = "⚠️ "
+		}
+		fmt.Fprintf(w, "  %s [%s] %s — %s\n", icon,
+			strings.ToUpper(string(c.Severity)), string(c.ID), c.Name)
+	}
+}
+
+func buildReportData(result scan.Result, ocChecks []scan.Check, ocVulnResult *openclaw.OCVulnResult, threatResult *threat.Result, containerCVEs *container.ImageCVEResult, analysis ai.Analysis, platform string, openPorts []string, pendingUpdates int, isRPi bool, rpiModel string) report.Data {
 	ra := report.AIAnalysis{
 		Overview:        analysis.Overview,
 		Risks:           analysis.Risks,
@@ -442,6 +502,7 @@ func buildReportData(result scan.Result, ocChecks []scan.Check, ocVulnResult *op
 		OCChecks:       ocChecks,
 		OCVulnResult:   ocVulnResult,
 		ThreatResult:   threatResult,
+		ContainerCVEs:  containerCVEs,
 		OpenPorts:      openPorts,
 		PendingUpdates: pendingUpdates,
 		SSHDirectives:  sshDirs,
