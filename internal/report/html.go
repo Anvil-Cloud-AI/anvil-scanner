@@ -1,6 +1,8 @@
 package report
 
 import (
+	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"strings"
@@ -8,6 +10,14 @@ import (
 
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/scan"
 )
+
+//go:embed assets/company-logo.jpeg
+var companyLogoJPEG []byte
+
+// companyLogoDataURI is the brand mark embedded as a base64 data URI so the
+// HTML report stays a single self-contained file with no external image
+// dependency. Computed once at package init.
+var companyLogoDataURI = "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(companyLogoJPEG)
 
 var statusColors = map[scan.Status]string{
 	scan.StatusPass: "#16a34a",
@@ -23,13 +33,14 @@ var severityColors = map[scan.Severity]string{
 	scan.SeverityLow:      "#6b7280",
 }
 
-var catOrder = []string{"SSH", "FW", "MACOS", "RPI"}
+var catOrder = []string{"SSH", "FW", "MACOS", "RPI", "CONTAINER"}
 
 var catLabels = map[string]string{
-	"SSH":   "🔑 SSH Hardening",
-	"FW":    "🛡️ Firewall",
-	"MACOS": "🍎 macOS Security",
-	"RPI":   "🍓 Raspberry Pi Security",
+	"SSH":       "🔑 SSH Hardening",
+	"FW":        "🛡️ Firewall",
+	"MACOS":     "🍎 macOS Security",
+	"RPI":       "🍓 Raspberry Pi Security",
+	"CONTAINER": "🐳 Container Hardening",
 }
 
 var findingDocs = map[string]string{
@@ -75,6 +86,7 @@ func renderHTML(d Data) string {
 	hasOCVulns := d.OCVulnResult != nil
 	showOCSection := hasOCChecks || hasOCVulns
 	hasThreat := d.ThreatResult != nil
+	hasContainers := d.ContainerCVEs != nil && !d.ContainerCVEs.Skipped && len(d.ContainerCVEs.Scans) > 0
 
 	type tab struct{ id, label string }
 	tabs := []tab{{"summary", "Summary"}}
@@ -82,6 +94,9 @@ func renderHTML(d Data) string {
 		tabs = append(tabs, tab{"priority", "Priority"})
 	}
 	tabs = append(tabs, tab{"system", "System"})
+	if hasContainers {
+		tabs = append(tabs, tab{"containers", "Containers"})
+	}
 	if showOCSection {
 		tabs = append(tabs, tab{"openclaw", "OpenClaw"})
 	}
@@ -292,7 +307,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
 .topbar{position:sticky;top:0;z-index:50;background:rgba(16,19,26,.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:14px 32px}
 .topbar-inner{max-width:1040px;margin:0 auto;width:100%%;display:flex;align-items:center;gap:12px}
 .brand{display:flex;align-items:center;gap:10px}
-.brand-mark{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,var(--accent) 0%%,#8b5cf6 100%%);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#0a0c11}
+.brand-mark{width:26px;height:26px;border-radius:6px;object-fit:cover;display:block}
 .topbar h1{margin:0;font-size:1.05rem;color:#f3f5f9;font-weight:600;letter-spacing:-.01em}
 .topbar-meta{color:var(--text-dim);font-size:.8rem;margin-left:auto;display:flex;align-items:center;gap:14px;font-variant-numeric:tabular-nums}
 .subnav{position:sticky;top:55px;z-index:49;background:rgba(10,12,17,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:0 32px;overflow-x:auto;scrollbar-width:none}
@@ -354,7 +369,7 @@ footer{text-align:center;color:var(--text-mut);font-size:.78rem;padding:28px 24p
 	b.WriteString(fmt.Sprintf(`<div class="topbar">
   <div class="topbar-inner">
     <div class="brand">
-      <span class="brand-mark">A</span>
+      <img class="brand-mark" src="%s" alt="Anvil Cloud logo">
       <h1>Anvil Scanner</h1>
     </div>
     <span class="topbar-meta">%s &nbsp;·&nbsp; %s</span>
@@ -362,7 +377,7 @@ footer{text-align:center;color:var(--text-mut);font-size:.78rem;padding:28px 24p
 </div>
 <nav class="subnav"><div class="subnav-inner">%s</div></nav>
 <div class="wrap">
-`, e(ts), e(platform), subnav))
+`, companyLogoDataURI, e(ts), e(platform), subnav))
 
 	// Summary section
 	b.WriteString(fmt.Sprintf(`  <div id="summary" data-nav-section>
@@ -400,6 +415,12 @@ footer{text-align:center;color:var(--text-mut);font-size:.78rem;padding:28px 24p
 		sshConfigHTML,
 		fail2banHTML,
 		extHTML))
+
+	// Containers section
+	if hasContainers {
+		b.WriteString(fmt.Sprintf("  <div id=\"containers\" data-nav-section>\n%s\n  </div>\n",
+			renderContainerCVEs(d.ContainerCVEs)))
+	}
 
 	// OpenClaw section
 	if showOCSection {
@@ -498,4 +519,3 @@ func renderPriorityCard(critCount, highCount int) string {
 		strings.Join(rows, "<br>"),
 	)
 }
-

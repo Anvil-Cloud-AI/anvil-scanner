@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/container"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/openclaw"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/scan"
 	"github.com/Anvil-Cloud-AI/anvil-scanner/internal/threat"
@@ -505,6 +506,116 @@ func renderOCVulns(r *openclaw.OCVulnResult) string {
 	)
 }
 
+// renderContainerCVEs renders the Containers section: one table per scanned
+// image listing its known vulnerabilities. The caller only invokes this when
+// there is at least one non-skipped scan to show.
+func renderContainerCVEs(r *container.ImageCVEResult) string {
+	if r == nil || r.Skipped || len(r.Scans) == 0 {
+		return ""
+	}
+
+	colorFor := func(sev string) string {
+		switch sev {
+		case "CRITICAL":
+			return "#dc2626"
+		case "HIGH":
+			return "#f97316"
+		case "MEDIUM":
+			return "#eab308"
+		case "LOW":
+			return "#65a30d"
+		default:
+			return "#6b7280"
+		}
+	}
+
+	var body strings.Builder
+	for _, s := range r.Scans {
+		body.WriteString(fmt.Sprintf(`<h3 style="margin-top:18px;"><code>%s</code></h3>`, e(s.Ref)))
+
+		if s.Error != "" {
+			body.WriteString(fmt.Sprintf(`<p style="color:#d97706;">⚠️ %s</p>`, e(s.Error)))
+			continue
+		}
+		if len(s.Findings) == 0 {
+			body.WriteString(`<p style="color:#16a34a;">✅ No known vulnerabilities</p>`)
+			continue
+		}
+
+		crit, high, med, low := 0, 0, 0, 0
+		for _, f := range s.Findings {
+			switch f.Severity {
+			case "CRITICAL":
+				crit++
+			case "HIGH":
+				high++
+			case "MEDIUM":
+				med++
+			default:
+				low++
+			}
+		}
+		parts := []string{}
+		for _, p := range []struct {
+			n   int
+			lbl string
+		}{{crit, "CRITICAL"}, {high, "HIGH"}, {med, "MEDIUM"}, {low, "LOW"}} {
+			if p.n > 0 {
+				parts = append(parts, fmt.Sprintf("%d %s", p.n, p.lbl))
+			}
+		}
+		body.WriteString(fmt.Sprintf(`<p style="color:#94a3b8;font-size:.85rem;margin:4px 0 8px;">%s</p>`,
+			e(strings.Join(parts, ", "))))
+
+		// Cap the rendered rows so a base image with thousands of CVEs can't
+		// produce a multi-megabyte report. Findings beyond the cap are summarized.
+		const maxRows = 200
+		shown := s.Findings
+		truncated := 0
+		if len(shown) > maxRows {
+			truncated = len(shown) - maxRows
+			shown = shown[:maxRows]
+		}
+
+		rows := ""
+		for _, f := range shown {
+			sc := colorFor(f.Severity)
+			// fixCell is intentionally raw HTML (a styled placeholder or an
+			// escaped version string); riskCell is a formatted float or em-dash.
+			// They occupy separate format slots so the escaping boundary is clear.
+			fixCell := e(f.FixedIn)
+			if fixCell == "" {
+				fixCell = `<span class="mut">none</span>`
+			}
+			riskCell := "—"
+			if f.Risk > 0 {
+				riskCell = fmt.Sprintf("%.1f", f.Risk)
+			}
+			rows += fmt.Sprintf(
+				`<tr><td><code>%s</code></td>`+
+					`<td><span style="color:%s;font-weight:700;white-space:nowrap;">%s</span></td>`+
+					`<td style="font-size:.83rem;">%s</td>`+
+					`<td style="font-size:.83rem;">%s</td>`+
+					`<td style="font-size:.83rem;color:#94a3b8;">%s / %s</td></tr>`,
+				e(f.ID), sc, e(f.Severity), e(f.Package), e(f.Version), e(riskCell), fixCell)
+		}
+		body.WriteString(
+			`<table><tr><th style="width:200px;">Vulnerability</th><th style="width:90px;">Severity</th>` +
+				`<th>Package</th><th>Installed</th><th>Risk / Fixed in</th></tr>` + rows + `</table>`)
+		if truncated > 0 {
+			body.WriteString(fmt.Sprintf(`<p class="mut">… and %d more finding(s) not shown.</p>`, truncated))
+		}
+	}
+
+	footer := fmt.Sprintf(`<p class="mut">Image vulnerabilities reported by <code>%s</code>. `+
+		`Runtime hardening findings appear under the System tab (CONTAINER-*).</p>`, e(r.Scanner))
+
+	return fmt.Sprintf(
+		`    <section><h2>🐳 Container Image Vulnerabilities</h2>%s%s</section>`,
+		body.String(), footer,
+	)
+}
+
 // renderThreatIntel renders the Threat Intelligence section.
 func renderThreatIntel(r *threat.Result) string {
 	if r == nil {
@@ -681,4 +792,3 @@ func renderThreatIntel(r *threat.Result) string {
 
 	return fmt.Sprintf(`    <section><h2>🛡️ Threat Intelligence</h2>%s</section>`, sections.String())
 }
-

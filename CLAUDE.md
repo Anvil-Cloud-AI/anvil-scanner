@@ -26,6 +26,7 @@ internal/
   report/               HTML + JSON report generation (go:embed template)
   ai/                   Anthropic / Ollama / OpenAI / Grok provider adapters
   threat/               CVE feed, CISA KEV, AbuseIPDB, IoC detection
+  container/            Container runtime hardening (docker/podman) + image CVE scan (grype/trivy)
   secrets/              AES-256-GCM encrypted store (keyring / file / env backends)
   openclaw/             OpenClaw audit wrapper (subprocess JSON protocol)
   backup/               Config snapshot + restore
@@ -51,3 +52,4 @@ internal/
 | FW-    | Linux firewall |
 | RPI-   | Raspberry Pi |
 | OC-    | OpenClaw audit |
+| CONTAINER- | Container runtime hardening (all containers, docker/podman) + image CVE rollup |
