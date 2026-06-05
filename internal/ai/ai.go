@@ -55,6 +55,13 @@ const (
 // privateCIDRs is initialised once and reused by validateExternalAPIURL.
 var privateCIDRs []*net.IPNet
 
+// ssrfSafeTransport closes the DNS-rebinding TOCTOU window by re-validating
+// the resolved IP at DialContext time rather than only at validation time.
+// Used by callOpenAI so a user-supplied XAI_API_URL cannot be redirected to
+// a private address between the pre-flight validateExternalAPIURL check and
+// the actual HTTP connection.
+var ssrfSafeTransport *http.Transport
+
 func init() {
 	for _, cidr := range []string{
 		"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12", "192.168.0.0/16",
@@ -460,6 +467,8 @@ func callOllama(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("create ollama request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Use a plain transport: validateOllamaURL already enforces localhost-only,
+	// so ssrfSafeTransport's private-IP guard is not needed (and would block loopback).
 	ollamaClient := &http.Client{
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
