@@ -1,0 +1,33 @@
+{
+  "name": "@anvil-cloud-ai/anvil-scanner-bridge",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin that exposes Anvil Scanner security tools to agents (host scanning, OpenClaw container auditing, and reversible hardening).",
+  "type": "module",
+  "main": "index.js",
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "compat": {
+      "pluginApi": ">=2026.3.24-beta.2"
+    },
+    "build": {
+      "openclawVersion": "2026.3.24-beta.2",
+      "pluginSdkVersion": "2026.3.24-beta.2"
+    }
+  },
+  "scripts": {
+    "build": "echo 'No build step required for this bridge plugin'"
+  },
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "security",
+    "hardening",
+    "anvil-scanner"
+  ],
+  "author": "Anvil Cloud AI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Anvil-Cloud-AI/anvil-scanner"
+  }
+}
