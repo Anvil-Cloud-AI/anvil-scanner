@@ -77,6 +77,20 @@ func TestParseRDPConfigNulls(t *testing.T) {
 	}
 }
 
+func TestParseUACEnabled(t *testing.T) {
+	cfg, err := parseUACEnabled(`{"EnableLUA":1}`)
+	if err != nil || cfg.EnableLUA == nil || *cfg.EnableLUA != 1 {
+		t.Fatalf("got %+v err=%v, want EnableLUA=1", cfg, err)
+	}
+	nullCfg, err := parseUACEnabled(`{"EnableLUA":null}`)
+	if err != nil || nullCfg.EnableLUA != nil {
+		t.Fatalf("got %+v err=%v, want nil EnableLUA", nullCfg, err)
+	}
+	if _, err := parseUACEnabled(""); err == nil {
+		t.Error("expected error on empty input")
+	}
+}
+
 func TestEvalUAC(t *testing.T) {
 	if got, _ := evalUAC(uacConfig{EnableLUA: intp(1)}); got != StatusPass {
 		t.Errorf("EnableLUA=1 should PASS, got %v", got)
