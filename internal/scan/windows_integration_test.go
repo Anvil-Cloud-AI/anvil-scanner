@@ -4,32 +4,44 @@ package scan
 
 import "testing"
 
-// TestWindowsFirewallCheckIntegration exercises the real WIN-FW-001 check
-// against the live Windows host (it runs on the windows-latest CI runner). It
-// asserts the check produces exactly one result with a valid status — it does
-// NOT assert firewall on/off, since runner state may vary. This validates that
-// the PowerShell collector + parser round-trip works on a real Windows box,
-// which the Mac-side unit tests cannot cover.
-func TestWindowsFirewallCheckIntegration(t *testing.T) {
+// TestWindowsChecksIntegration runs the full Windows check suite against the
+// live host (executes on the windows-latest CI runner). It validates the real
+// PowerShell collector + parser round-trip that the Mac-side unit tests cannot
+// cover. It does not assert specific pass/fail verdicts (runner state varies),
+// but every check must emit a valid status, and the checks that rely on
+// always-present registry/service state must not SKIP (a SKIP there means the
+// collector or parser broke).
+func TestWindowsChecksIntegration(t *testing.T) {
 	b := NewBuilder()
-	checkWindowsFirewall(b)
+	RunAllChecksInto(b)
 	result := b.Build()
 
-	var found *Check
-	for i := range result.Checks {
-		if result.Checks[i].ID == "WIN-FW-001" {
-			found = &result.Checks[i]
-			break
+	got := map[string]Check{}
+	for _, c := range result.Checks {
+		got[c.ID] = c
+		t.Logf("%-12s %-5s %s — %s", c.ID, c.Status, c.Name, c.Detail)
+	}
+
+	wantIDs := []string{
+		"WIN-000", "WIN-FW-001", "WIN-AV-001",
+		"WIN-SMB-001", "WIN-RDP-001", "WIN-UAC-001", "WIN-UPD-001",
+	}
+	for _, id := range wantIDs {
+		c, ok := got[id]
+		if !ok {
+			t.Errorf("%s not emitted", id)
+			continue
+		}
+		if !c.Status.IsValid() {
+			t.Errorf("%s: invalid status %q", id, c.Status)
 		}
 	}
-	if found == nil {
-		t.Fatal("WIN-FW-001 not emitted")
-	}
-	if !found.Status.IsValid() {
-		t.Errorf("invalid status %q", found.Status)
-	}
-	// A real runner should resolve to a concrete state, not a parse SKIP.
-	if found.Status == StatusSkip {
-		t.Errorf("firewall check skipped on a real Windows host: %s", found.Detail)
+
+	// These read registry/service state present on every Windows host, so a
+	// SKIP indicates a broken collector or parser rather than a missing feature.
+	for _, id := range []string{"WIN-FW-001", "WIN-RDP-001", "WIN-UAC-001", "WIN-UPD-001"} {
+		if c, ok := got[id]; ok && c.Status == StatusSkip {
+			t.Errorf("%s unexpectedly SKIPPED on a real Windows host: %s", id, c.Detail)
+		}
 	}
 }

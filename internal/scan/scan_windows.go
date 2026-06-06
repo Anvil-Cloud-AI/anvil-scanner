@@ -26,7 +26,12 @@ func RunAllChecksInto(b *CheckBuilder) {
 		fmt.Sprintf("Detected %s", DetectWindowsSKU()),
 		SeverityLow,
 	)
-	checkWindowsFirewall(b)
+	checkWindowsFirewall(b)   // WIN-FW-001
+	checkWindowsDefenderAV(b) // WIN-AV-001
+	checkWindowsSMBv1(b)      // WIN-SMB-001
+	checkWindowsRDP(b)        // WIN-RDP-001
+	checkWindowsUAC(b)        // WIN-UAC-001
+	checkWindowsUpdate(b)     // WIN-UPD-001
 }
 
 // RunAllChecks executes all hardening checks for the current platform and
