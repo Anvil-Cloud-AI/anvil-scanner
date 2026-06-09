@@ -2,7 +2,7 @@
 
 Turnkey security hardening scanner for OpenClaw deployments.
 Single static binary — no Python, no virtualenv, no `pip install`.
-**Supports Linux (Ubuntu/Debian) and macOS (Intel + Apple Silicon), Raspberry Pi.**
+**Supports Linux (Ubuntu/Debian), macOS (Intel + Apple Silicon), Raspberry Pi, and Windows 11 / Windows Server (read-only scanning).**
 
 ---
 
@@ -23,15 +23,16 @@ Single static binary — no Python, no virtualenv, no `pip install`.
 
 ## Features
 
-- **Host scanning** — open ports, SSH config, pending updates, running services
-- **AI risk analysis** — risk score (1–10) + recommendations (Ollama, Claude, OpenAI, Grok)
-- **Firewall checks** — `ufw` on Linux, `pf` + Application Firewall on macOS
-- **SSH hardening checks** — 44 checks covering config, algorithms, permissions
-- **Threat intelligence** — Shodan, AbuseIPDB, local IoC scanning, CVE exposure, CISA KEV
-- **OpenClaw audit** — runs `openclaw security audit`, maps findings to checks, tailors remediation by install channel (npm / brew / source)
-- **Encrypted secrets store** — AES-256-GCM container with keyring, passphrase, or file backends
-- **Scheduling** — `launchd` plist on macOS, `crontab` on Linux
-- **Backup & revert** — every modified system file is snapshotted before any change
+- **Host scanning** — open ports, SSH config, pending updates, running services (Linux / macOS / Raspberry Pi)
+- **Windows hardening checks** — Defender Firewall, Antivirus, SMBv1, RDP, UAC, Windows Update (Windows 11 / Server, read-only, no admin required)
+- **AI risk analysis** — risk score (1–10) + recommendations (Ollama, Claude, OpenAI, Grok) — not yet available on Windows
+- **Firewall checks** — `ufw` on Linux, `pf` + Application Firewall on macOS, Windows Defender Firewall on Windows
+- **SSH hardening checks** — 44 checks covering config, algorithms, permissions (Linux / macOS / Raspberry Pi)
+- **Threat intelligence** — Shodan, AbuseIPDB, local IoC scanning, CVE exposure, CISA KEV (not yet available on Windows)
+- **OpenClaw audit** — runs `openclaw security audit`, maps findings to checks, tailors remediation by install channel (not yet available on Windows)
+- **Encrypted secrets store** — AES-256-GCM container with keyring, passphrase, or file backends (Linux / macOS / Raspberry Pi)
+- **Scheduling** — `launchd` plist on macOS, `crontab` on Linux (not yet available on Windows)
+- **Backup & revert** — every modified system file is snapshotted before any change (Linux / macOS / Raspberry Pi; `--harden` not yet available on Windows)
 
 ---
 
@@ -57,6 +58,11 @@ sudo mv anvil-scanner /usr/local/bin/
 # Linux (arm64 / Raspberry Pi)
 curl -L https://github.com/Anvil-Cloud-AI/anvil-scanner/releases/latest/download/anvil-scanner_linux_arm64.tar.gz | tar xz
 sudo mv anvil-scanner /usr/local/bin/
+
+# Windows (amd64)
+# Download from releases page and place in your PATH, or run from the directory:
+# https://github.com/Anvil-Cloud-AI/anvil-scanner/releases/latest/download/anvil-scanner_windows_amd64.zip
+# Note: Windows SmartScreen may warn; the binary is unsigned but safe. Windows checks require no admin.
 ```
 
 ## Configuration
@@ -98,7 +104,7 @@ sudo anvil-scanner --rotate-key-backend keyring
 
 ---
 
-## Running with sudo
+## Running with Elevated Privileges (Linux / macOS / Raspberry Pi)
 
 Most operations require **sudo** — scanning reads system files (`/etc/ssh/sshd_config`, kernel parameters) and hardening modifies firewall rules and SSH config.
 
@@ -114,9 +120,15 @@ Most operations require **sudo** — scanning reads system files (`/etc/ssh/sshd
 
 Running without sudo still produces a partial scan; checks that need root show `SKIP`.
 
+## Running on Windows
+
+Windows hardening checks **do not require admin** — they are read-only. You can run `anvil-scanner.exe` from any command prompt (or PowerShell). The checks read system settings only; no modifications are made.
+
 ---
 
 ## Usage
+
+### Linux, macOS, Raspberry Pi
 
 ```bash
 # Full scan — host + OpenClaw + threat intelligence + AI analysis (most common)
@@ -177,6 +189,29 @@ anvil-scanner --version
 sudo anvil-scanner --init-secrets --backend keyring
 ```
 
+### Windows 11 / Windows Server
+
+On Windows, only read-only security scanning is supported. No admin required. AI analysis, threat intelligence, hardening (`--harden`), scheduling, and backup/revert are not yet implemented.
+
+```powershell
+# Full hardening scan (read-only, no admin required)
+anvil-scanner.exe
+
+# Write HTML report to a specific path
+anvil-scanner.exe --html C:\Reports\scan.html
+
+# Write JSON report to a specific path
+anvil-scanner.exe --json-output C:\Reports\scan.json
+
+# Print JSON report to console
+anvil-scanner.exe --json
+
+# Print version
+anvil-scanner.exe --version
+```
+
+Note: Windows SmartScreen may warn when running the unsigned binary — this is safe and expected. The Windows checks in Anvil Scanner require no administrator elevation.
+
 ---
 
 ## Threat Intelligence
@@ -234,18 +269,21 @@ brew install grype     # or: brew install trivy
 
 ## Platform Support
 
-| Feature | Linux (Ubuntu/Debian) | macOS | Raspberry Pi OS |
-|---------|----------------------|-------|-----------------|
-| Port scanning | `ss` / `netstat` | `lsof` | `ss` / `netstat` |
-| Pending updates | `apt list --upgradable` | `brew outdated` + `softwareupdate` | `apt list --upgradable` |
-| Firewall checks | `ufw` / `iptables` | `pf` + App Firewall | `ufw` / `iptables` |
-| SSH checks | ✅ 44 checks | ✅ (gated on Remote Login) | ✅ |
-| macOS-specific | — | SIP, FileVault, Gatekeeper, Firmware PW | — |
-| Raspberry Pi checks | — | — | ✅ 12 checks |
-| AI risk analysis | ✅ | ✅ | ✅ |
-| HTML / JSON reports | ✅ | ✅ | ✅ |
-| Scheduling | `crontab` | `launchd` plist | `crontab` |
-| Secrets store | ✅ | ✅ | ✅ |
+| Feature | Linux (Ubuntu/Debian) | macOS | Raspberry Pi OS | Windows 11 / Server |
+|---------|----------------------|-------|-----------------|---------------------|
+| Port scanning | `ss` / `netstat` | `lsof` | `ss` / `netstat` | — |
+| Pending updates | `apt list --upgradable` | `brew outdated` + `softwareupdate` | `apt list --upgradable` | — |
+| Firewall checks | `ufw` / `iptables` | `pf` + App Firewall | `ufw` / `iptables` | Windows Defender Firewall |
+| SSH checks | ✅ 44 checks | ✅ (gated on Remote Login) | ✅ | — |
+| Windows-specific checks | — | — | — | ✅ 6 checks (Defender AV, SMBv1, RDP, UAC, Update service) |
+| macOS-specific checks | — | SIP, FileVault, Gatekeeper, Firmware PW | — | — |
+| Raspberry Pi checks | — | — | ✅ 12 checks | — |
+| AI risk analysis | ✅ | ✅ | ✅ | — (not yet available) |
+| HTML / JSON reports | ✅ | ✅ | ✅ | ✅ |
+| Hardening (--harden) | ✅ | ✅ | ✅ | — (not yet available) |
+| Scheduling | `crontab` | `launchd` plist | `crontab` | — (not yet available) |
+| Secrets store | ✅ | ✅ | ✅ | — (not yet available) |
+| Admin required | Yes | Yes | Yes | No (read-only scanning) |
 
 ---
 
