@@ -33,13 +33,14 @@ var severityColors = map[scan.Severity]string{
 	scan.SeverityLow:      "#6b7280",
 }
 
-var catOrder = []string{"SSH", "FW", "MACOS", "RPI", "CONTAINER"}
+var catOrder = []string{"SSH", "FW", "MACOS", "RPI", "WIN", "CONTAINER"}
 
 var catLabels = map[string]string{
 	"SSH":       "🔑 SSH Hardening",
 	"FW":        "🛡️ Firewall",
 	"MACOS":     "🍎 macOS Security",
 	"RPI":       "🍓 Raspberry Pi Security",
+	"WIN":       "🪟 Windows Security",
 	"CONTAINER": "🐳 Container Hardening",
 }
 
@@ -47,6 +48,7 @@ var findingDocs = map[string]string{
 	"SSH":   "docs/ssh-hardening.md",
 	"MACOS": "docs/macos-hardening.md",
 	"RPI":   "docs/raspberry-pi-hardening.md",
+	"WIN":   "docs/windows-hardening.md",
 }
 
 const findingDocsBase = "https://github.com/Anvil-Cloud-AI/anvil-scanner/blob/main/"
