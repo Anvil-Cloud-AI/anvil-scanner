@@ -13,6 +13,7 @@ Plain-English security guides for every check category. Each guide explains *why
 | [Filesystem Security](filesystem-security.md) | Secure /tmp mounts, find world-writable files, audit SUID/SGID binaries, and set safe default umask values |
 | [User & Auth Hardening](user-auth-hardening.md) | Fix empty passwords, remove rogue root accounts, enforce password aging and complexity with PAM, and set up account lockout |
 | [macOS Hardening](macos-hardening.md) | macOS-specific guide: SIP, FileVault, Gatekeeper, Application Firewall, Remote Login, screen sharing, and firmware password |
+| [Windows Hardening](windows-hardening.md) | Windows 11 and Server hardening: Defender Firewall, Antivirus, SMBv1, RDP, UAC, and Windows Update — read-only checks requiring no admin |
 | [Fail2ban Setup](fail2ban-setup.md) | Install and configure fail2ban to automatically block brute-force attacks on SSH and OpenClaw — includes exact jail configs |
 | [OpenClaw Security](openclaw-security.md) | Secure your OpenClaw deployment: block ports with ufw, set up an nginx reverse proxy, use encrypted secrets, and API key best practices |
 | [OpenClaw Plugin Protocol](plugin-protocol.md) | How anvil-scanner integrates with OpenClaw: subprocess protocol, JSON finding schema, install-channel detection, severity mapping, and report integration |
@@ -28,6 +29,7 @@ Plain-English security guides for every check category. Each guide explains *why
 | FS-001 through FS-005 | [Filesystem Security](filesystem-security.md) |
 | AUTH-001 through AUTH-005 | [User & Auth Hardening](user-auth-hardening.md) |
 | MACOS-001 through MACOS-008 | [macOS Hardening](macos-hardening.md) |
+| WIN-000, WIN-FW-001, WIN-AV-001, WIN-SMB-001, WIN-RDP-001, WIN-UAC-001, WIN-UPD-001 | [Windows Hardening](windows-hardening.md) |
 
 For OpenClaw configuration checks, anvil-scanner delegates to OpenClaw's own
 `openclaw security audit --json` and surfaces the findings verbatim. Each
@@ -38,7 +40,10 @@ see the [OpenClaw security docs](https://docs.openclaw.ai/security).
 
 ## About Anvil Scanner
 
-Anvil Scanner is an open-source security scanner for Linux and macOS systems. It checks hundreds of configuration settings against CIS Benchmarks and other industry standards, then generates a prioritized report with specific recommendations.
+Anvil Scanner is a cross-platform security hardening scanner for Linux, macOS, Raspberry Pi, and Windows. It checks hundreds of configuration settings against CIS Benchmarks and other industry standards, then generates a prioritized report with specific recommendations.
+
+- **Linux / macOS / Raspberry Pi**: Full scanning, hardening, scheduling, AI analysis, threat intelligence, and OpenClaw integration
+- **Windows 11 / Windows Server**: Read-only scanning (no admin required), HTML/JSON reports; hardening and advanced features are not yet available
 
 - [GitHub Repository](https://github.com/Anvil-Cloud-AI/anvil-scanner)
 - [README](../README.md)

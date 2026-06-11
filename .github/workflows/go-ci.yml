@@ -6,8 +6,9 @@ on:
     paths-ignore:
       - 'docs/**'
       - '*.md'
+  # Run on all pull requests regardless of base branch so stacked PRs
+  # (e.g. feature work based on another feature branch) are still validated.
   pull_request:
-    branches: [main]
     paths-ignore:
       - 'docs/**'
       - '*.md'

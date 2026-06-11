@@ -7,26 +7,31 @@ import (
 	"time"
 )
 
-// This file is a Tier-0 Windows placeholder. The Unix scan orchestration in
-// scan.go calls into macOS/Linux/RPi-specific runners that do not exist on
-// Windows. Until real Windows hardening checks are implemented, the Windows
-// build emits a single SKIP placeholder so the report pipeline runs end to
-// end and produces a coherent (empty-of-findings) result.
+// This file orchestrates the Windows hardening checks. The Unix scan
+// orchestration in scan.go calls into macOS/Linux/RPi-specific runners that do
+// not exist on Windows, so Windows has its own RunAllChecksInto here.
 
 // Platform returns the canonical platform name on Windows.
 func Platform() string {
 	return "Windows"
 }
 
-// RunAllChecksInto populates b with the Windows placeholder check set. For
-// Tier-0 this is a single SKIP entry; real Windows checks land in a later phase.
+// RunAllChecksInto populates b with the Windows hardening checks. WIN-000 is an
+// informational entry recording the detected SKU (Windows 11 Client vs Server),
+// followed by the individual WIN-* checks. More checks are added as they land.
 func RunAllChecksInto(b *CheckBuilder) {
-	b.Skip(
+	b.Pass(
 		"WIN-000",
-		"Windows checks (placeholder)",
-		fmt.Sprintf("Windows hardening checks not yet implemented (detected %s)", DetectWindowsSKU()),
-		SeverityMedium,
+		"Windows platform detected",
+		fmt.Sprintf("Detected %s", DetectWindowsSKU()),
+		SeverityLow,
 	)
+	checkWindowsFirewall(b)   // WIN-FW-001
+	checkWindowsDefenderAV(b) // WIN-AV-001
+	checkWindowsSMBv1(b)      // WIN-SMB-001
+	checkWindowsRDP(b)        // WIN-RDP-001
+	checkWindowsUAC(b)        // WIN-UAC-001
+	checkWindowsUpdate(b)     // WIN-UPD-001
 }
 
 // RunAllChecks executes all hardening checks for the current platform and
