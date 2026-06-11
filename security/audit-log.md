@@ -14,6 +14,62 @@ Every entry records: date, scope, toolchain, findings by severity, and fix refer
 
 ---
 
+## 2026-06-09 — Pre-merge deep review: Windows port (feat/windows-checks)
+
+**Type:** Periodic
+
+**Date:** 2026-06-09
+
+**Scope:** Pre-merge security review of branch `feat/windows-checks` diff vs `origin/main` (~1,002 LOC across 28 files). New code: `internal/scan/scan_windows.go`, `windows_checks.go`, `windows_firewall.go` (Windows-tagged collectors that shell out to PowerShell and `reg.exe` via `internal/exec`); `windows_checks_parse.go`, `windows_firewall_parse.go`, `sku.go` (pure parsers, un-tagged); `sku_windows.go`, `fileowner_windows.go` (Windows stubs); `cmd/anvil-scanner/main_windows.go` (Windows entry point); build-tag broadening on `internal/container`, `internal/openclaw`, `internal/threat` (adding `|| windows`); `.github/workflows/go-ci.yml` (added `windows-latest` runner, removed `branches: [main]` restriction from `pull_request` trigger). Six specific areas assessed: (1) command/argument injection in PowerShell and reg.exe collectors; (2) untrusted PowerShell JSON output parsing; (3) privilege — read-only / no-admin assertion; (4) XSS in the HTML report for WIN-* check data; (5) CI trigger change risk; (6) secrets, SSRF, crypto, info-leak in error strings.
+
+**Toolchain:**
+
+Native (darwin, default platform):
+- `go vet ./...` — 0 findings
+- `staticcheck ./...` — 0 findings
+- `gosec -quiet ./...` — 40 findings, all pre-existing (same set as the 2026-06-04 entry); **0 findings in any new Windows file**
+- `govulncheck ./...` — 4 standard-library advisories (GO-2026-5039 `net/textproto`, GO-2026-5037 `crypto/x509`, GO-2026-4971 `net`, GO-2026-4918 `net/http`), all pre-existing and fixed in go1.26.3/go1.26.4 (local toolchain is go1.26.2); confirmed pre-existing by stashing the branch and re-running on `main`; none introduced by this branch
+- `go test ./...` — all 13 packages pass; new Windows parser unit tests (`TestParseFirewallProfiles`, `TestEvalFirewallProfiles`, `TestParseDefenderStatus`, `TestEvalDefender`, `TestParseAndEvalSMB1`, `TestEvalRDP`, `TestParseRDPConfigNulls`, `TestParseUACEnabled`, `TestEvalUAC`, `TestParseServiceDisabled`, `TestParseInstallationType`) all pass on darwin
+
+Windows cross-target (SAST tools skip windows-tagged code by default — this is the required workaround):
+- `GOOS=windows GOARCH=amd64 go vet ./...` — 0 findings
+- `GOOS=windows GOARCH=amd64 staticcheck ./...` — 0 findings
+- `GOOS=windows GOARCH=amd64 go build ./...` — clean (confirms windows-tagged code compiles without error)
+
+Note: `gosec` does not support cross-OS GOOS targeting for windows-tagged code via the environment variable; the darwin-native run above skips `//go:build windows` files. Runtime execution on a live Windows host is covered by `windows_integration_test.go` (`TestWindowsChecksIntegration`) running on the `windows-latest` GitHub Actions runner added in this branch.
+
+**Results:**
+
+- **No CRITICAL findings.**
+- **No HIGH findings.**
+- **No MEDIUM findings.**
+- 1 LOW / informational finding (functional gap, no security impact — see below).
+- All six assessed areas verified clean.
+
+Detailed findings:
+
+1. **Command/argument injection — CLEAN.** Every PowerShell invocation uses `iexec.Run("powershell", "-NoProfile", "-NonInteractive", "-Command", command)` where `command` is a Go string literal (backtick raw string or concatenation of string literals only — verified at `windows_checks.go:36,54,72,93,114` and `windows_firewall.go:18`). The `reg.exe` call in `sku_windows.go:12` uses explicit static argv elements. No user-controlled data flows into any command argument: every `check*` function accepts only a `*CheckBuilder`, and the call graph from `main_windows.go` is `RunAllChecksInto(b)` → `check*(b)` with no CLI flag values passed through.
+
+2. **Untrusted output parsing — CLEAN.** All PowerShell JSON is decoded through `encoding/json.Unmarshal` into typed structs. The custom `jbool.UnmarshalJSON` returns a `nil` error in all cases, converting unknown input safely to `false`; a nil `json.RawMessage` also decodes safely to `false` (string conversion of nil is `""`, matched by `case "false", "":` in `rawJSONToBool`). Pointer fields (`rdpConfig.DenyTS`, `rdpConfig.NLA`, `uacConfig.EnableLUA`) decode JSON `null` to `nil` correctly and are nil-checked before dereference. The `parseServiceDisabled` function uses `json.RawMessage` + `strconv.Atoi` to handle numeric/string `StartType` values safely. Output is bounded by the pre-existing 1 MiB exec cap in `internal/exec.limitedWriter` (`maxExecOutputBytes = 1*1024*1024`), which applies to all `iexec.Run` calls including the new ones. No `unsafe`, no reflection, no deserialization outside `encoding/json`.
+
+3. **Privilege — CLEAN.** None of the `check*` functions call `iexec.RunElevated`, `exec.WriteFileElevated`, `os.Remove`, or any write API. All subprocess calls are read-only PowerShell queries (`Get-MpComputerStatus`, `Get-SmbServerConfiguration`, `Get-NetFirewallProfile`, `Get-Service`, registry `Get-ItemProperty`) and a `reg query` (read). No UAC-elevation path is implemented in this branch, consistent with the stated design intent. `fileowner_windows.go` is a stub returning 0; it performs no I/O.
+
+4. **Report / XSS — CLEAN.** WIN-* check fields (`ID`, `Name`, `Detail`, `Severity`, `Status`) are produced by the parser layer as controlled Go constants and strings derived from the bounded, typed JSON decode. In the HTML report, Priority Findings (the only section where WIN-* checks can surface — see below) passes every field through `e()` (`html.EscapeString`) at `html.go:195` (`detail := e(f.Detail)`), `201` (`e(string(f.ID))`, `e(f.Name)`), `202` (`e(strings.ToUpper(string(f.Severity)))`). Report files are written with `0o600` permissions. One functional gap noted: `catOrder` in `html.go:36` does not include `"WIN"`, so WIN-* checks are grouped into `cats["WIN"]` during `renderExtendedChecks` but are never rendered in the Extended Hardening Checks table. They DO appear in the Priority Findings section (which iterates all `d.Checks`) and they are counted in the status-pill totals and the "N checks" header. This is a UX inconsistency (WIN failures visible in priority section but absent from the system detail table), not a security issue. Noted for the team.
+
+5. **CI trigger change — LOW RISK.** Removing `branches: [main]` from `pull_request` means CI runs on PRs targeting any branch, enabling CI validation for stacked feature branches. With `pull_request` (not `pull_request_target`), fork PRs run in a restricted context with no access to repository secrets. The workflow uses no repository secrets at all (confirmed: no `secrets.*` references, no `GITHUB_TOKEN` beyond the implicit read-only token). The two jobs that do use elevated permissions (`gosec`, `semgrep`) only request `security-events: write` to upload SARIF results — standard and appropriate. No secret exposure risk. Adding `windows-latest` to the build matrix increases CI cost and surface area slightly, but introduces no security concern.
+
+6. **Secrets, SSRF, crypto, info-leak — CLEAN.** No hardcoded credentials or tokens in any new file. No outbound network calls in the new Windows code. No cryptographic operations. Error strings surface PowerShell/registry error text in `Check.Detail` fields (e.g., "could not read Terminal Server registry keys") — these are user-visible but contain only static tool-provided error context, not secret material or internal paths. The `fmt.Sprintf("Detected %s", DetectWindowsSKU())` in `scan_windows.go:26` interpolates only the `WindowsSKU.String()` return value, which is one of three controlled constants.
+
+**Remediation summary:**
+
+No security fixes required. The functional gap (WIN-* checks absent from the Extended Hardening Checks table) is informational and should be addressed in a follow-up by adding `"WIN"` to `catOrder` and a corresponding entry in `catLabels` in `internal/report/html.go`.
+
+**Fix commits:** N/A — no security issues found. Branch `feat/windows-checks` is clear for merge from a security standpoint pending normal code review.
+
+**Notes:** The govulncheck stdlib advisories (GO-2026-5039, GO-2026-5037, GO-2026-4971, GO-2026-4918) are pre-existing and require a Go toolchain bump to ≥1.26.4. This is a repo-wide action tracked separately. Runtime execution of the Windows integration test (`TestWindowsChecksIntegration`) requires the `windows-latest` CI runner; local analysis on darwin using cross-target `GOOS=windows` vet/staticcheck/build is the best available substitute for static analysis of windows-tagged code.
+
+---
+
 ## 2026-06-04 — Pre-merge deep review: container scanning feature
 
 **Type:** Periodic

@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build darwin || linux || windows
 
 // Package container scans local container runtimes (docker, podman) for
 // runtime-hardening issues and known image vulnerabilities.

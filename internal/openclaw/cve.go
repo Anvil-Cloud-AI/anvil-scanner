@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build darwin || linux || windows
 
 package openclaw
 
@@ -61,12 +61,12 @@ var ocVersionRE = regexp.MustCompile(`(\d+\.\d+(?:\.\d+)*)`)
 // rawFeedEntry matches the jgamblin/OpenClawCVEs ghsa-advisories.json schema.
 // Fields not needed for version-matching are omitted.
 type rawFeedEntry struct {
-	GHSAID       string `json:"ghsa_id"`
-	CVEID        string `json:"cve_id"`   // may be "" when JSON null
-	Severity     string `json:"severity"` // lowercase in the feed
-	Title        string `json:"title"`
-	Published    string `json:"published"`    // YYYY-MM-DD
-	FixedVersion string `json:"fixed_version"` // e.g. "2026.4.23"; "" when unfixed
+	GHSAID       string  `json:"ghsa_id"`
+	CVEID        string  `json:"cve_id"`   // may be "" when JSON null
+	Severity     string  `json:"severity"` // lowercase in the feed
+	Title        string  `json:"title"`
+	Published    string  `json:"published"`     // YYYY-MM-DD
+	FixedVersion string  `json:"fixed_version"` // e.g. "2026.4.23"; "" when unfixed
 	CVSS         float64 `json:"cvss"`
 }
 
@@ -74,7 +74,7 @@ type rawFeedEntry struct {
 // this wrapper adds fetchedAt and the derived updated date so we can assess
 // cache freshness without re-fetching.
 type feedCache struct {
-	Updated   string         `json:"updated"`             // newest Published date in the feed
+	Updated   string         `json:"updated"` // newest Published date in the feed
 	Entries   []rawFeedEntry `json:"entries"`
 	FetchedAt string         `json:"fetchedAt,omitempty"` // RFC3339
 }
