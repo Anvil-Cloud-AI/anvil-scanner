@@ -24,16 +24,16 @@ builds:
 
 archives:
   - id: anvil-scanner-versioned
-    builds: [anvil-scanner]
+    ids: [anvil-scanner]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats: [tar.gz]
     files:
       - LICENSE
       - README.md
   - id: anvil-scanner-latest
-    builds: [anvil-scanner]
+    ids: [anvil-scanner]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats: [tar.gz]
     files:
       - LICENSE
       - README.md
