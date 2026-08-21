@@ -447,7 +447,7 @@ func isBinaryFile(data []byte) bool {
 
 // readMagicBytes reads the first n bytes of a file without opening it fully.
 func readMagicBytes(path string, n int) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G703 G304 -- host-local scan path; reading local files is this scanner's purpose, and this read is bounded to n bytes by io.ReadFull below
 	if err != nil {
 		return nil, err
 	}
@@ -732,7 +732,7 @@ func checkMacOSTmpdir(result *LocalIOCResult, selfExe string) {
 	if !filepath.IsAbs(macTmpDir) {
 		return
 	}
-	fi, err := os.Stat(macTmpDir)
+	fi, err := os.Stat(macTmpDir) // #nosec G703 -- TMPDIR comes from the operator environment; checked absolute just above and IsDir on this result
 	if err != nil || !fi.IsDir() {
 		return
 	}
