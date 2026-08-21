@@ -193,7 +193,7 @@ func OllamaReachable() bool {
 	base := strings.TrimRight(ollamaBase, "/")
 	ctx, cancel := context.WithTimeout(context.Background(), ollamaProbeTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/tags", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/tags", nil) // #nosec G704 -- validateOllamaURL above restricts scheme to http and hostname to localhost/127.0.0.1/::1
 	if err != nil {
 		return false
 	}
@@ -202,7 +202,7 @@ func OllamaReachable() bool {
 			DialContext: (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
 		},
 	}
-	resp, err := probeClient.Do(req)
+	resp, err := probeClient.Do(req) // #nosec G704 -- probe target already validated localhost-only by validateOllamaURL
 	if err != nil {
 		return false
 	}
@@ -359,7 +359,7 @@ func validateExternalAPIURL(rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("URL has no host")
 	}
-	addrs, err := net.LookupHost(host)
+	addrs, err := net.LookupHost(host) // #nosec G704 -- this lookup IS the SSRF guard: it resolves the host to test it against private ranges
 	if err != nil {
 		// Cannot resolve — treat as safe (DNS failure at config time should not block startup).
 		return nil
@@ -425,7 +425,7 @@ func callOllama(ctx context.Context, prompt string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/generate",
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/generate", // #nosec G704 -- base validated localhost-only by validateOllamaURL
 		bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create ollama request: %w", err)
@@ -438,7 +438,7 @@ func callOllama(ctx context.Context, prompt string) (string, error) {
 			DialContext: (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		},
 	}
-	resp, err := ollamaClient.Do(req)
+	resp, err := ollamaClient.Do(req) // #nosec G704 -- request target already validated localhost-only by validateOllamaURL
 	if err != nil {
 		return "", fmt.Errorf("ollama request failed: %w", err)
 	}
@@ -548,7 +548,7 @@ func callOpenAI(ctx context.Context, prompt, model, key, baseURL string) (string
 	}
 	ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, // #nosec G704 -- baseURL validated by validateExternalAPIURL; sent via SSRF-guarded safehttp client
 		strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create API request: %w", err)
@@ -556,7 +556,7 @@ func callOpenAI(ctx context.Context, prompt, model, key, baseURL string) (string
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
 	// Use the centralized SSRF-safe client.
-	resp, err := safehttp.SafeClient(providerCallTimeout).Do(req)
+	resp, err := safehttp.SafeClient(providerCallTimeout).Do(req) // #nosec G704 -- safehttp.SafeClient applies a dial-time guard rejecting private/loopback/link-local IPs
 	if err != nil {
 		return "", fmt.Errorf("API request failed: %w", err)
 	}

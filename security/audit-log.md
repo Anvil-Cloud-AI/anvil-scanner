@@ -14,6 +14,64 @@ Every entry records: date, scope, toolchain, findings by severity, and fix refer
 
 ---
 
+## 2026-08-21 — Dependency currency + supply-chain hardening pass
+
+**Type:** Periodic
+
+**Date:** 2026-08-21
+
+**Scope:** Scheduled maintenance pass over `main` after ~7 weeks without updates. Covered the Go toolchain pin, all `golang.org/x/*` module requirements, every GitHub Actions reference in both workflows, the Dependabot configuration, and a full re-run of the documented scanner suite. No product code was changed other than `#nosec` review annotations. Triggered by explicit request to bring dependencies current and re-run the end-to-end security suite.
+
+**Toolchain:**
+- `go build ./...` — clean
+- `go test -race ./...` — full suite, all 13 packages pass
+- `go vet ./...` — clean
+- `staticcheck ./...` — 0 findings
+- `govulncheck ./...` (v1.7.0) — 0 called vulnerabilities
+- `gosec` v2.28.0 — 31 findings, 0 HIGH
+- `semgrep` (p/golang + p/owasp-top-ten + p/secrets) — 0 findings
+- End-to-end run of the built binary (`--no-ai`, JSON + HTML report) to confirm the upgraded toolchain produces a working scan
+
+**Results:**
+- **No CRITICAL findings. No HIGH findings remaining.**
+- **9 called Go standard-library CVEs cleared** by moving the `toolchain` pin from `go1.26.4` to `go1.26.7`. Before the bump `govulncheck` reported 9 vulnerabilities reachable from this codebase's call graph, plus 5 in imported packages and 8 in required modules; after, all are 0:
+  - `GO-2026-6218` — quadratic complexity in `net/url` `resolvePath` (fixed 1.26.6)
+  - `GO-2026-6090` — unbounded post-handshake messages in `crypto/tls` (fixed 1.26.6)
+  - `GO-2026-5972` — missing recursion-depth limit in `encoding/asn1` (fixed 1.26.6)
+  - `GO-2026-5856` — Encrypted Client Hello privacy leak in `crypto/tls` (fixed 1.26.5)
+  - `GO-2026-5026` — ASCII-only Punycode labels not rejected, via `net/http` (fixed 1.26.6)
+  - `GO-2026-5039` — unescaped inputs in `net/textproto` errors (fixed 1.26.4)
+  - `GO-2026-5037` — inefficient candidate hostname parsing in `crypto/x509` (fixed 1.26.4)
+  - `GO-2026-4971` — panic on NUL byte in `net.Dial`/`LookupPort` (fixed 1.26.3)
+  - `GO-2026-4918` — infinite loop in HTTP/2 transport on bad `SETTINGS_MAX_FRAME_SIZE` (fixed 1.26.3)
+  - Reachability was concentrated in `internal/ai` (`OllamaReachable`, `validateExternalAPIURL`) and `internal/safehttp`, i.e. the outbound-HTTP paths — the highest-value place to close TLS/HTTP stdlib gaps.
+- **1 module-level advisory accepted, not actionable:** `GO-2026-5932` (`golang.org/x/crypto/openpgp` is unmaintained and unsafe by design; **Fixed in: N/A**). Verified by grep that the repo imports only `golang.org/x/crypto/scrypt` — `openpgp` is not imported, not linked, and not reachable. Nothing to remediate; it will persist in module-level output for as long as `x/crypto` is a dependency.
+- **gosec 2.28.0 introduced taint-analysis rules `G703`/`G704`**, which produced 9 new HIGH findings against code that already has explicit guards. All 9 were manually traced and confirmed false positives, then annotated with `#nosec <rule> -- <rationale>` per the convention in `scanners.md`. Evidence for each class:
+  - `internal/ai/ai.go` Ollama paths (196, 205, 428, 441) — `validateOllamaURL` pins the scheme to `http` and the hostname to an allowlist of `localhost` / `127.0.0.1` / `::1` before any request is built. The plain transport here is deliberate: the SSRF guard would reject loopback.
+  - `internal/ai/ai.go:362` — the flagged `net.LookupHost` **is** the SSRF guard itself, inside `validateExternalAPIURL`, resolving the host precisely so it can be tested against private ranges.
+  - `internal/ai/ai.go` provider paths (551, 559) — URL validated by `validateExternalAPIURL`, and the request is issued through `safehttp.SafeClient`, whose dial-time hook resolves the host, rejects any answer inside the private/loopback/link-local CIDR set, and then dials the **resolved IP** (which also closes the DNS-rebinding TOCTOU window rather than just checking-then-dialing-by-name).
+  - `internal/threat/ioc.go:450` — `os.Open` inside `readMagicBytes`, on a host-local scan path; reading local files is this tool's entire purpose, and this read is bounded to `n` bytes by `io.ReadFull` into a fixed buffer (the sibling `readFileCapped` bounds its own reads with `io.LimitReader`). This line carries `G304` in addition to the new `G703`, so both are named in one directive — see the code-scanning note below.
+  - `internal/threat/ioc.go:735` — `TMPDIR` from the operator's own environment, validated absolute and confirmed to be a directory before use.
+  - gosec totals moved 40 → 31 (0 HIGH, 17 MEDIUM, 14 LOW, 9 suppressed-with-rationale). The remaining MEDIUM `G304`/`G204` and LOW `G104` findings are pre-existing, unchanged by this pass, and inherent to a local host scanner that reads operator-specified paths and shells out to system tools with explicit argv.
+- **semgrep went 18 findings → 0.** Every finding was CI supply-chain hygiene rather than product code — no Go code findings at all:
+  - 15 × mutable action tag (`github-actions-mutable-action-tag`) — floating `@vN` refs can be repointed by an upstream tag move, so a compromised upstream reaches CI silently. Closed by pinning every action to a full commit SHA with a trailing version comment.
+  - 2 × `dependabot-missing-cooldown` — closed by a 7-day `cooldown.default-days` on both ecosystems, so a freshly published (possibly compromised) release is not proposed during the window where it is most likely still undetected.
+
+**Remediation summary:**
+- **Toolchain:** `toolchain go1.26.4` → `go1.26.7`. The `go 1.25.0` language directive was deliberately left alone to preserve the existing minimum-version compatibility floor. Go 1.27.0 is also GA and was **not** adopted in this pass: 1.26.7 clears every outstanding advisory, so a major-line move brings stdlib behavior change with no security benefit and should be a deliberate, separately verified migration.
+- **Modules:** `golang.org/x/crypto` v0.53.0 → v0.55.0; `golang.org/x/term` v0.44.0 → v0.45.0; `golang.org/x/sys` v0.46.0 → v0.47.0 (indirect). `go mod tidy` clean; no new requirements pulled in.
+- **Actions (all now SHA-pinned):** `actions/checkout` v4 → v7.0.1; `actions/setup-go` v6 → v7.0.0; `securego/gosec` v2.27.1 → v2.28.0; `github/codeql-action/upload-sarif` v3 → v4.37.8; `golang/govulncheck-action` v1 → v1.1.0; `goreleaser/goreleaser-action` v6 → v7.2.3.
+  - `actions/checkout` v7's breaking change (fork PRs are no longer checked out for `pull_request_target` / `workflow_run`) was reviewed against both workflows: they trigger on `push` and `pull_request` only, so the change is inert here. `setup-go` v7 and `goreleaser-action` v7 are ESM/Node-runtime majors with no input-schema changes.
+  - `github/codeql-action` v3 → v4 keeps the same `sarif_file` input; no call-site change beyond the version.
+- **Dependabot:** added `cooldown.default-days: 7` to both the `gomod` and `github-actions` ecosystems. SHA pins remain Dependabot-updatable — it rewrites the SHA and the version comment together.
+- **Annotations:** 9 `#nosec` directives added with mandatory rationale (see above). `nosec` count moves 0 → 9; each one is a reviewed finding, so the "zero *unreviewed* high-severity findings" gate holds.
+- **Worth knowing for future passes:** annotating a line re-attributes *every* alert on that line as new. `ioc.go:450` already carried a pre-existing MEDIUM `G304`; suppressing only the new `G703` left the `G304` in place, and because the line itself had changed, GitHub code scanning reported it as "1 new alert in code changed by this pull request" and failed the PR's `gosec` check — even though the finding predated the branch and the `gosec SAST` job itself passed. The fix is to name every rule the line triggers in one directive (`#nosec G703 G304 -- ...`). Note also that gosec analyses only the host build context, so a local darwin run does not cover `*_linux.go` / `*_windows.go`; CI's gosec job runs on `ubuntu-latest`.
+
+**Verification:** Full suite re-run after every change — `go build`, `go test -race`, `go vet`, `staticcheck`, `govulncheck`, `gosec`, and `semgrep` all green as recorded above. Workflow and Dependabot YAML re-parsed after editing. A real end-to-end scan on macOS (Apple Silicon) completed successfully on the new toolchain: 9 checks (6 pass / 0 fail / 0 warn / 3 skipped — SSH config and Remote Login are sudo-gated, firmware password is N/A on Apple Silicon), container scan, OpenClaw audit, OpenClaw CVE check, and threat-intel (local IoC, CVE, Shodan) all executed, and both JSON and HTML reports rendered.
+
+**Fix commits:** This pass (see `go.mod`, `.github/workflows/go-ci.yml`, `.github/workflows/release.yml`, `.github/dependabot.yml`, `internal/ai/ai.go`, `internal/threat/ioc.go`).
+
+**Notes:** gosec, govulncheck, staticcheck, and semgrep were installed locally for this pass, as CI normally provides them; semgrep needed a virtualenv because the system Python is PEP-668 externally managed. The `securego/gosec` CI job still carries `continue-on-error: true`, so despite `scanners.md` describing gosec as blocking, it does not currently gate a merge — worth reconciling either the workflow or the doc. Adding a scheduled (cron) `govulncheck` run would also catch newly disclosed stdlib CVEs between pushes; this pass found 9 reachable advisories that had accrued silently since the last commit precisely because the scanners only run on push.
 ## 2026-06-09 — Pre-merge deep review: Windows port (feat/windows-checks)
 
 **Type:** Periodic

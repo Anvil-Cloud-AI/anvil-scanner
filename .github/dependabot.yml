@@ -7,6 +7,11 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+    # Wait 7 days before proposing a newly published version. A freshly
+    # published release is the window in which a compromised upstream is
+    # most likely to still be undetected.
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -15,3 +20,5 @@ updates:
     open-pull-requests-limit: 3
     labels:
       - "ci"
+    cooldown:
+      default-days: 7
