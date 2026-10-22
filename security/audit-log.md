@@ -14,6 +14,43 @@ Every entry records: date, scope, toolchain, findings by severity, and fix refer
 
 ---
 
+## 2026-10-22 — Toolchain patch for CVE-2026-111943 and dependency currency
+
+**Type:** Periodic
+
+**Date:** 2026-10-22
+
+**Scope:** Dependency audit after the October 2026 disclosure wave, including the eMudhra/emSign intermediate CA key compromise. Covered the Go toolchain pin, `golang.org/x/*` requirements, GitHub Actions pins, the Node bridge plugin, and a search for Dockerfiles, Python/PHP manifests, and vendored CA bundles. No application code changed. TLS verification is unchanged: outbound clients still use default `crypto/tls` verification (the telemetry client only sets `MinVersion: TLS 1.2`). Go 1.26.10 adds a denylist inside `crypto/x509.Certificate.Verify`; this repo does not import `golang.org/x/crypto/x509roots/fallback`.
+
+**Toolchain:**
+- `go build ./...` — clean (linux, plus `windows/amd64`, `windows/arm64`, `darwin/amd64`, `darwin/arm64`)
+- `go test ./...` and `go test -race ./...` — all 13 packages pass
+- `go vet ./...` — clean
+- `staticcheck ./...` — 0 findings
+- `govulncheck ./...` (v1.9.0, DB updated 2026-10-21) — 0 called vulnerabilities after the toolchain bump
+
+**Results:**
+- **10 called standard-library advisories cleared** by moving `toolchain` from `go1.26.7` to `go1.26.10`. Before the bump, `govulncheck` reported them reachable from `internal/ai`, `internal/safehttp` callers, and `internal/threat`:
+  - `GO-2026-6809` / CVE-2026-111943 — `crypto/x509` still trusted compromised eMudhra intermediates (fixed 1.26.10)
+  - `GO-2026-6607` / CVE-2026-97031 — malformed ECH outer extensions in `crypto/tls` (fixed 1.26.9)
+  - `GO-2026-6605` / CVE-2026-56866 — HTTP/1 client desynchronization after CONNECT rejection (fixed 1.26.9)
+  - `GO-2026-6610` / CVE-2026-78660 — HTTP/2 transport forwarded malformed framing headers (fixed 1.26.9)
+  - `GO-2026-6611` / CVE-2026-78669 — HTTP/2 initial-window CPU exhaustion (fixed 1.26.9)
+  - `GO-2026-6608` / CVE-2026-94440 — MIME header memory-limit bypass in `net/textproto` (fixed 1.26.9)
+  - `GO-2026-6603` / CVE-2026-78659, `GO-2026-6617` / CVE-2026-97032, `GO-2026-6612` / CVE-2026-78663, `GO-2026-6613` / CVE-2026-94439 — HTTP/2 and CONNECT server issues in `net/http` (fixed 1.26.9). Symbol-reachable because the client and server share `net/http`; this binary does not serve HTTP.
+- **Present in the 1.26.7 stdlib but not called, and cleared by the same bump:** `GO-2026-6599` / CVE-2026-94448 and `GO-2026-6600` / CVE-2026-97030 (`html/template`; reports use `html.EscapeString`), `GO-2026-6609` / CVE-2026-78667 (`FileServer` Range headers), `GO-2026-6604` / CVE-2026-56857 (`os.Root` on Windows). The `cmd/go` checksum-bypass fixes CVE-2026-94444 and CVE-2026-94447 ship in the same toolchain and are not in the scanner call graph.
+- **1 module-level advisory accepted, not actionable:** `GO-2026-5932` (`golang.org/x/crypto/openpgp` is unmaintained; **Fixed in: N/A**). The only import is `golang.org/x/crypto/scrypt`.
+- **No product images, Python, PHP, or vendored CA bundles.** `plugins/anvil-scanner-bridge` has no npm dependencies and no lockfile. `actions/checkout` v7.0.1, `actions/setup-go` v7.0.0, `securego/gosec` v2.29.0, and `golang/govulncheck-action` v1.1.0 were already current. The `semgrep/semgrep` CI image stays unpinned so rule packs track upstream.
+
+**Remediation summary:**
+- **Toolchain:** `toolchain go1.26.7` → `go1.26.10`. The `go 1.26.0` language line is unchanged. Go 1.27.3 contains the same fixes; 1.26 is still supported, so this pass does not move major lines.
+- **Modules:** `golang.org/x/crypto` v0.57.0 → v0.58.0; `golang.org/x/term` v0.46.0 → v0.47.0; `golang.org/x/sys` v0.48.0 → v0.49.0 (indirect). No new requirements. `x/net` is not a dependency; its October fixes are in the standard library this binary actually links.
+- **Actions:** `github/codeql-action/upload-sarif` v4.37.8 → v4.39.1; `goreleaser/goreleaser-action` v7.2.3 → v7.3.0. Both remain full-SHA pins. v4.39.1 was published 2026-10-21 (inside the 7-day Dependabot cooldown). This workflow only uploads SARIF and does not run the CodeQL bundle; the v4.39.1 delta over v4.39.0 is that default bundle.
+
+**Follow-up:** Rebuild and replace released binaries. The `crypto/x509` denylist is compiled in, so tags through v1.4.0 stay affected until a release is cut from this toolchain. This repo publishes no container images; downstream images that wrap the binary need a no-cache rebuild after that release. No project keys or certificates to rotate.
+
+**Fix commits:** This pass (`go.mod`, `go.sum`, `.github/workflows/go-ci.yml`, `.github/workflows/release.yml`).
+
 ## 2026-08-21 — Dependency currency + supply-chain hardening pass
 
 **Type:** Periodic
